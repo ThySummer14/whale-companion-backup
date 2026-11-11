@@ -1,0 +1,26 @@
+node_modules/
+/lib/
+dist/
+dist-web/
+.expo/
+apps/mobile/ios/
+apps/mobile/android/
+*.tgz
+*.log
+.DS_Store
+/.work/
+/.playwright-cli/
+/建设bot参考/
+/*.apk
+.env
+.env.*
+!.env.example
+*.jks
+*.keystore
+*.p12
+*.pfx
+key.properties
+local.properties
+
+# DSH Go uses a pinned upstream checkout and a reviewed backup patch.
+/apps/dsh-go/

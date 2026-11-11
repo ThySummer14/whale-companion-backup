@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="device">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>大肥鱼 · Live2D</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden}
+    body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#283e50;background:#f6f8fa}
+    main{height:100%;display:grid;grid-template-rows:auto minmax(0,1fr) auto;padding:10px;gap:8px}
+    .bar{min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
+    #status{flex:1;min-width:11em;font-size:13px}
+    label{display:inline-flex;align-items:center;gap:6px;min-height:36px;white-space:nowrap;font-size:12px}
+    input{width:17px;height:17px;accent-color:#336889}
+    .stage{overflow:hidden;min-width:0;min-height:0;border:1px solid #d6e4ee;border-radius:12px;background:#e7f0f6}
+    canvas{display:block;width:100%;height:100%;visibility:hidden;pointer-events:none}
+    body[data-ready="true"] canvas{visibility:visible}
+    footer{font-size:11px;color:#496279;text-align:center}
+    @media(prefers-color-scheme:dark){
+      body{color:#dce9f5;background:#1b2631}
+      .stage{border-color:#324a5f;background:#223448}
+      footer{color:#a8bdd0}
+    }
+  </style>
+</head>
+<body data-ready="false">
+  <main>
+    <header class="bar">
+      <span id="status" role="status">正在连接展示服务</span>
+      <label><input id="reduce-motion" type="checkbox"><span id="reduce-motion-label">减少动作</span></label>
+    </header>
+    <div class="stage"><canvas id="canvas" aria-label="大肥鱼 Live2D 舞台"></canvas></div>
+    <footer>原画及拆分：神宫凉子 · Live2D 建模：霓虹猫_NeonNeko</footer>
+  </main>
+  <script src="vendor/live2dcubismcore.min.js"></script>
+  <script src="vendor/pixi.min.js"></script>
+  <script src="vendor/cubism4.min.js"></script>
+  <script type="module" src="presenter.mjs"></script>
+</body>
+</html>

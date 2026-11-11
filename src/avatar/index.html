@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f4f8fc">
+  <title>大肥鱼 · Live2D 舞台</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f4f8fc;color:#203247;font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}main{max-width:900px;margin:auto;padding:18px}header{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:12px}h1{font-size:20px;margin:0;font-weight:650}.muted{color:#697e92;font-size:12px}.status{color:#397493;white-space:nowrap}.stage{position:relative;height:min(65vh,610px);min-height:390px;border:1px solid #d8e5ef;border-radius:16px;overflow:hidden;background:radial-gradient(ellipse at 50% 36%,#fff 0,#edf5fa 64%,#e5eff6 100%)}canvas{display:block;width:100%;height:100%}.loading{position:absolute;inset:0;display:grid;place-content:center;text-align:center;background:#f4f8fc;color:#52728b}.error{position:absolute;inset:auto 16px 16px;padding:12px;border:1px solid #e6b5b5;border-radius:8px;color:#9b3737;background:#fff4f4}.controls{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}button{border:1px solid #c5d9e8;background:#fff;color:#2a5f83;border-radius:8px;padding:8px 16px;font:inherit;cursor:pointer;min-height:40px}button:hover:not(:disabled){background:#eaf4fb}button:disabled{opacity:.5;cursor:wait}button.primary{background:#3277a4;color:#fff;border-color:#3277a4}details{border-top:1px solid #dce7ef;padding-top:10px}summary{cursor:pointer;color:#59748b}pre{white-space:pre-wrap;word-break:break-word;font:11px/1.5 ui-monospace,monospace;color:#5a6e80;max-height:190px;overflow:auto}footer{margin-top:14px;color:#76899a;font-size:11px}a{color:#437999}p{margin:6px 0}[hidden]{display:none!important}
+  </style>
+</head>
+<body>
+<main>
+  <header><div><h1>大肥鱼 · Live2D</h1><div class="muted">本地模型 · 真实渲染 · 受限动作</div></div><span id="status" class="status" role="status">正在唤醒</span></header>
+  <section class="stage" aria-label="大肥鱼实时形象"><canvas id="canvas" aria-label="DeepSeek-chan Live2D 实时模型"></canvas><div id="loading" class="loading">正在加载模型与物理…</div><div id="error" class="error" role="alert" hidden></div></section>
+  <div class="controls"><button class="primary" data-action="blush" disabled>脸红</button><button data-action="point" disabled>抬手示意</button><button data-action="nod" disabled>点头</button><button data-action="shake" disabled>摇头</button><button id="stop" disabled>停止并回到待机</button><button id="voice-unlock">启用声音</button><button id="voice-stop" disabled>停止语音</button></div>
+  <div class="controls"><label><input id="context-motion" type="checkbox" aria-describedby="context-motion-status" checked> 情境动作</label><span id="context-motion-status" class="muted">跟随宿主回传的当前活动。</span></div>
+  <div class="controls"><label for="voice-auto-scene">自动朗读场景</label><select id="voice-auto-scene" disabled><option value="">选择已绑定的场景</option></select><button id="voice-auto" disabled>开启自动朗读</button></div>
+  <p id="voice-auto-status" class="muted" role="status">自动朗读默认关闭。</p>
+  <details><summary>真实运行状态</summary><pre id="telemetry">尚未收到渲染帧</pre></details>
+  <footer>原画及拆分：神宫凉子 · Live2D 建模：霓虹猫_NeonNeko<br>个人私有素材，不随 Companion 插件重新分发 · <a href="/companion/avatar/NOTICE.txt" target="_blank" rel="noopener">素材与运行库许可</a></footer>
+</main>
+<script src="/companion/avatar/vendor/live2dcubismcore.min.js"></script>
+<script src="/companion/avatar/vendor/pixi.min.js"></script>
+<script src="/companion/avatar/vendor/cubism4.min.js"></script>
+<script type="module" src="/companion/avatar/stage.mjs"></script>
+</body>
+</html>

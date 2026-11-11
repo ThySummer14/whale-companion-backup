@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "小鲸鱼",
+    "slug": "companion-dev",
+    "scheme": "companion-dev",
+    "version": "0.5.1",
+    "icon": "./assets/icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "ai.companion.bot.dev",
+      "supportsTablet": true,
+      "buildNumber": "7"
+    },
+    "android": {
+      "package": "ai.companion.bot.dev",
+      "versionCode": 7,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#D7EDFC"
+      }
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "./plugins/with-network-security.js",
+      "expo-video",
+      ["expo-image-picker", { "photosPermission": "选择图片发布到小鲸鱼动态" }],
+      ["expo-audio", { "microphonePermission": false, "recordAudioAndroid": false, "enableBackgroundPlayback": false, "enableBackgroundRecording": false }]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

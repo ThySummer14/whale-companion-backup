@@ -1,0 +1,44 @@
+Companion Live2D stage notices
+
+This package contains no character model, texture, PSD, voice model, or Live2D Cubism Core.
+Those resources are loaded from the owner's private Avatar directory and are not redistributed by the Companion bundle.
+
+Model credits (for the owner's privately supplied model):
+- Illustration and separation: 神宫凉子
+- Live2D modeling: 霓虹猫_NeonNeko
+- Model: DeepSeek-chan / 大肥鱼, 神宫凉子免费配布模型
+The model's original usage notice remains with the private model files. Public use requires source attribution and compliance with that notice.
+
+MotionEngine, sampleMotion, DriverPipeline and IdleEvents are adapted from the local reference:
+https://github.com/InariNGT-Ofiicial/jingyu-live2d-agent
+See web/engine.mjs, web/driver-pipeline.mjs and web/idle-events.mjs in that project.
+MIT License, copyright (c) 2026 Tequed232:
+
+The clipping-mask buffer adaptation in stage.mjs is based on the tail-edge fix in:
+https://github.com/HoppoChan0721/dsh-desktop-petbox
+Specifically patch/apply-jingyu.mjs's bounded 256-to-2048 clipping-mask upgrade.
+MIT License, copyright (c) 2026 whale-pet-shell contributors.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+PixiJS 6.5.10 and pixi-live2d-display 0.4.0 are MIT licensed. Their license texts and source links are retained in the vendor directory.
+Cubism Web Framework is subject to the Live2D Open Software License; its notice is retained in the vendor directory.
+Cubism Core is separately obtained from the official Live2D SDK and is subject to the Live2D Proprietary Software License:
+https://www.live2d.com/eula/live2d-proprietary-software-license-agreement_en.html
+The proprietary Core file is not included here and must not be added to this redistributable stage directory.

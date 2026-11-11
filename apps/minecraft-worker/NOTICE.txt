@@ -1,0 +1,23 @@
+Minecraft worker third-party notices
+
+msa.mjs is reused from blueziii/dsh-mc-agent:
+https://github.com/blueziii/dsh-mc-agent
+Upstream package version: 0.6.78. License: MIT.
+The upstream license is retained in UPSTREAM-LICENSE.txt.
+
+The Microsoft device-code flow uses prismarine-auth, included by Mineflayer.
+MSA_AUTH_TITLE and MSA_DEVICE_TYPE follow the upstream prismarine-auth Minecraft Nintendo Switch flow. No password is requested by this project. Device codes are shown only to the owner; access and refresh tokens stay in the private per-account cache and are never returned by worker APIs, written to model prompts, or logged deliberately.
+
+mineflayer, mineflayer-pathfinder, mineflayer-collectblock and zod retain their respective licenses. Dependencies are installed in the worker's isolated deployment, not in the DSH host profile.
+
+The Coopcraft deployment uses Carpet and CarpetBaritoneIntegration (CBI):
+https://github.com/Hikari16665/CarpetBaritoneIntegration
+CBI upstream README and LICENSE.md declare AGPL-3.0; the original fabric.mod.json declares LGPL-3.0-or-later. This project preserves the stricter source-sharing treatment. The modified JAR is not bundled into the DSH tarball. The complete corresponding source snapshot, upstream license and local patches are archived separately as CarpetBaritoneIntegration-companion-20261108.tar.gz in the private reference/deployment source directory. CBI's independent LLM is disabled by Companion; automatic CBI receipts bypass it, execution-time world reads use the authoritative ServerLevel, and find operations have explicit completion receipts and a bounded 5x5-chunk scan.
+
+The 0.12.0 development candidate additionally changes CBI's EmergencyAvoidanceController and CarpetInputController, and adds SurvivalResourcePolicy. These changes provide tick-level shield/combat/fireball/reflex handling and return-resource accounting/crafting. The corresponding candidate source is archived separately as CarpetBaritoneIntegration-survival-20261108.tar.gz. The stable 0.11.4 archive is retained; the candidate has not been deployed or verified in the real Coopcraft world.
+
+The 0.12.1 through 0.12.4 development candidates add game lessons, safe-return planning/execution, SurvivalCraftingService and owner-authorized camp building. Their complete corresponding CBI source snapshots and upstream license are archived separately. The 0.12.3 crafting candidate uses Minecraft's real RecipeManager/CraftingInput recipes, exact output checks and rollback-safe inventory transactions. The 0.12.4 camp builder checks owner zones and each placement without overwriting existing blocks. The CBI JAR is not bundled into the DSH package and these candidates have not been deployed or verified in the real Coopcraft world.
+
+The 0.15.2 candidate registers the survival, return, craft and buildcamp commands and sends the full survival status to the caller and server log. The corresponding source and license are archived as CarpetBaritoneIntegration-companion-0.15.2-20261108.tar.gz. The updated JAR was verified in an isolated Minecraft 1.21.1 Fabric world.
+
+The 0.78.0 candidate uses the homebuildone capability to place a single authorized blueprint cell. The separate modified CBI JAR has complete corresponding source and upstream license in CarpetBaritoneIntegration-homebuild-0.78-source.tar.gz.

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN" data-mode="obs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>大肥鱼 · 独立展示</title>
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}
+    body{font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#284760}
+    main{height:100%;display:grid;grid-template-rows:minmax(0,1fr)}
+    .stage{min-height:0;min-width:0;position:relative;overflow:hidden}
+    canvas{display:block;width:100%;height:100%;opacity:0;transition:opacity 180ms ease;pointer-events:none}
+    body[data-ready="true"] canvas{opacity:1}
+    .desktop{display:none}
+    html[data-mode="desktop"]{background:#f3f7fa}
+    html[data-mode="desktop"] main{grid-template-rows:auto minmax(0,1fr) auto;gap:10px;padding:12px}
+    html[data-mode="desktop"] .desktop{display:block}
+    html[data-mode="desktop"] .stage{background:#e7f0f6;border-radius:12px;border:1px solid #d6e4ee}
+    html[data-mode="desktop"] body[data-theme="dark"] .stage{background:#23364a;border-color:#23364a}
+    html[data-mode="desktop"] body[data-theme="plain"] .stage{background:#fff;border-color:#e2eaf0}
+    h1{font-size:17px;margin:0;font-weight:650}
+    #status{color:#4c6479;font-size:12px;min-height:18px}
+    .controls{display:flex;align-items:center;gap:8px 12px;flex-wrap:wrap;color:#3c586e;font-size:12px}
+    .controls label{display:inline-flex;align-items:center;gap:6px}
+    select{font:inherit;color:inherit;border:1px solid #a4bacb;border-radius:6px;background:#fff;padding:3px 5px}
+    input[type=range]{width:80px;accent-color:#396b8d}
+    footer small{display:block;color:#526c80;margin-top:6px;font-size:10px}
+    @media (prefers-reduced-motion:reduce){canvas{transition:none}}
+  </style>
+</head>
+<body data-ready="false">
+  <main>
+    <header class="desktop"><h1>大肥鱼 · 桌面展示</h1><div id="status" role="status">正在连接展示服务</div></header>
+    <div class="stage"><canvas id="canvas" aria-label="大肥鱼 Live2D 独立画面"></canvas></div>
+    <footer class="desktop">
+      <div class="controls">
+        <label>背景<select id="theme"><option value="light">浅蓝</option><option value="dark">深蓝</option><option value="plain">白色</option></select></label>
+        <label>缩放<input id="zoom" type="range" min="65" max="100" step="5" value="100"></label>
+      </div>
+      <small>原画及拆分：神宫凉子 · Live2D 建模：霓虹猫_NeonNeko</small>
+    </footer>
+  </main>
+  <script src="/vendor/live2dcubismcore.min.js"></script>
+  <script src="/vendor/pixi.min.js"></script>
+  <script src="/vendor/cubism4.min.js"></script>
+  <script type="module" src="/presenter.mjs"></script>
+</body>
+</html>

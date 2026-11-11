@@ -1,0 +1,16 @@
+{
+  "name": "@companion/minecraft-worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Isolated Carpet/CBI worker with an optional Mineflayer adapter",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "dependencies": {
+    "mineflayer": "https://github.com/u9g/mineflayer/releases/download/v4.39.0-allprs.3/mineflayer-4.39.0.tgz",
+    "mineflayer-collectblock": "1.6.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "zod": "4.4.3"
+  }
+}
