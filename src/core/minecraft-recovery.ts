@@ -34,8 +34,8 @@ export interface HouseRecoveryObservation {
 export const HouseRecoveryPlan = z.string().trim().min(6).max(240).regex(/^[^\p{Cc}\p{Bidi_Control}]+$/u)
 
 export const HouseRecoveryPlacedCell = z.strictObject({
-  index: z.int().min(0).max(124),
-  material: z.enum(['oak_planks', 'spruce_planks', 'cobblestone', 'glass']),
+  index: z.int().min(0).max(262143),
+  material: z.enum(['oak_planks', 'spruce_planks', 'cobblestone', 'glass', 'cherry_planks', 'pink_concrete', 'smooth_sandstone', 'dark_oak_planks', 'lantern', 'cherry_leaves']),
 })
 export type HouseRecoveryPlacedCell = z.infer<typeof HouseRecoveryPlacedCell>
 export const HouseRecoveryPlacements = z.array(HouseRecoveryPlacedCell).min(1).max(HOUSE_RECOVERY_PLACEMENT_LIMITS.continuous.placed)

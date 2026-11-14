@@ -4,7 +4,7 @@ import { MINECRAFT_HOUSE_BLOCKS, MinecraftHouseRequest, minecraftHouseCells, typ
 export const MINECRAFT_HOUSE_CANDIDATE_LIMIT = 12
 export const MinecraftHouseCellIndex = z.int().min(0).max(124)
 const Coordinate = z.int().min(0).max(4)
-const Material = z.enum([MINECRAFT_HOUSE_BLOCKS.o, MINECRAFT_HOUSE_BLOCKS.s, MINECRAFT_HOUSE_BLOCKS.c, MINECRAFT_HOUSE_BLOCKS.g])
+const Material = z.enum(['oak_planks', 'spruce_planks', 'cobblestone', 'glass', 'cherry_planks', 'pink_concrete', 'smooth_sandstone', 'dark_oak_planks', 'lantern', 'cherry_leaves'])
 const Cell = z.strictObject({ index: MinecraftHouseCellIndex, x: Coordinate, y: Coordinate, z: Coordinate, material: Material })
 
 export function minecraftHouseCellTarget(layout: MinecraftHouseLayout, index: number): z.infer<typeof Cell> | undefined {

@@ -8,14 +8,21 @@ export const MINECRAFT_HOUSE_BLOCKS = {
   s: 'spruce_planks',
   c: 'cobblestone',
   g: 'glass',
+  p: 'cherry_planks',
+  k: 'pink_concrete',
+  y: 'smooth_sandstone',
+  d: 'dark_oak_planks',
+  l: 'lantern',
+  e: 'cherry_leaves',
 } as const
 
 export type MinecraftHouseSymbol = keyof typeof MINECRAFT_HOUSE_BLOCKS
 export type MinecraftHouseMaterial = (typeof MINECRAFT_HOUSE_BLOCKS)[Exclude<MinecraftHouseSymbol, '.'>]
 const Material = z.enum(Object.values(MINECRAFT_HOUSE_BLOCKS).filter((block): block is MinecraftHouseMaterial => block !== 'air'))
-export const MINECRAFT_HOUSE_MAX_SIDE = 5
-export const MINECRAFT_HOUSE_MAX_BLOCKS = 100
-export const MINECRAFT_HOUSE_SYMBOLS = /^[.oscg]+$/u
+export const MINECRAFT_HOUSE_MAX_SIDE = 64
+export const MINECRAFT_HOUSE_MAX_BLOCKS = 20000
+export const HOUSE_SECTION_CAPACITY = 100
+export const MINECRAFT_HOUSE_SYMBOLS = /^[.oscgpkydle]+$/u
 const Side = z.int().min(1).max(MINECRAFT_HOUSE_MAX_SIDE)
 const Volume = z.int().min(0).max(MINECRAFT_HOUSE_MAX_SIDE ** 3)
 const Count = z.int().min(0).max(MINECRAFT_HOUSE_MAX_BLOCKS)
@@ -28,7 +35,7 @@ export const MinecraftHouseLayout = z.strictObject({
 }).refine(({ width, height, depth, blocks }) => {
   const placed = blocks.replaceAll('.', '').length
   return blocks.length === width * height * depth && placed >= 1 && placed <= MINECRAFT_HOUSE_MAX_BLOCKS
-}, 'Layout must use its full volume with one to 100 solid blocks')
+}, 'Layout must use its full volume with one to 20000 solid blocks')
 export type MinecraftHouseLayout = z.infer<typeof MinecraftHouseLayout>
 
 export const MINECRAFT_HOUSE_FACADE_MATERIALS = ['o', 's', 'c'] as const satisfies readonly MinecraftHouseSymbol[]
@@ -129,7 +136,7 @@ export const MinecraftHousePreview = z.strictObject({
   ready: z.boolean(),
   reason: z.string().regex(/^[a-z0-9-]{1,64}$/u).optional(),
   checked: Volume,
-  materials: z.array(MinecraftHouseMaterialNeed).min(1).max(4).optional(),
+  materials: z.array(MinecraftHouseMaterialNeed).min(1).max(10).optional(),
 }).refine(({ ready, reason, checked, materials }) => (!ready || checked > 0 && reason === undefined) &&
   (!materials || !ready && reason === 'homebuild-materials' && materials.some(row => row.missing > 0) &&
     new Set(materials.map(row => row.material)).size === materials.length &&

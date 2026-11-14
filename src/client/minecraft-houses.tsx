@@ -16,6 +16,12 @@ export const HOUSE_BLOCK_LABELS = {
   spruce_planks: { name: '云杉木板', mark: '杉' },
   cobblestone: { name: '圆石', mark: '石' },
   glass: { name: '玻璃', mark: '玻' },
+  cherry_planks: { name: '樱花木板', mark: '樱' },
+  pink_concrete: { name: '粉色混凝土', mark: '粉' },
+  smooth_sandstone: { name: '平滑砂岩', mark: '砂' },
+  dark_oak_planks: { name: '深色橡木木板', mark: '深' },
+  lantern: { name: '灯笼', mark: '灯' },
+  cherry_leaves: { name: '樱花树叶', mark: '叶' },
 }
 const SITE_REASONS: Readonly<Record<string, string>> = {
   'homebuild-materials': '背包里的施工材料不足。',

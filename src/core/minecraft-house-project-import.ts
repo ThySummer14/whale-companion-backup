@@ -1,12 +1,13 @@
 import { z } from 'zod'
-import { MINECRAFT_HOUSE_MAX_BLOCKS, MINECRAFT_HOUSE_MAX_SIDE, MINECRAFT_HOUSE_SYMBOLS,
+import { HOUSE_SECTION_CAPACITY, MINECRAFT_HOUSE_MAX_SIDE, MINECRAFT_HOUSE_SYMBOLS,
   type MinecraftHouseSymbol } from './minecraft-house.ts'
 import { MinecraftHouseProjectInput, PROJECT_MAX_SECTIONS, PROJECT_SECTION_OFFSET_LIMIT,
   minecraftHouseProjectSectionRequest } from './minecraft-house-project.ts'
 import type { MinecraftAuthorizedZone } from './minecraft-supply.ts'
 
-const MAX_CELLS = MINECRAFT_HOUSE_MAX_SIDE ** 3 * PROJECT_MAX_SECTIONS
-const MAX_SOLIDS = MINECRAFT_HOUSE_MAX_BLOCKS * PROJECT_MAX_SECTIONS
+const MAX_CELLS = 750
+const SECTION_SIDE = 5
+const MAX_SOLIDS = HOUSE_SECTION_CAPACITY * PROJECT_MAX_SECTIONS
 const Side = z.int().min(1).max(2 * PROJECT_SECTION_OFFSET_LIMIT + 1)
 const WholeLayout = z.strictObject({
   width: Side,
@@ -16,7 +17,7 @@ const WholeLayout = z.strictObject({
 }).refine(({ width, height, depth, blocks }) => {
   if (blocks.length !== width * height * depth) return false
   const solid = blocks.replaceAll('.', '').length
-  return solid > MINECRAFT_HOUSE_MAX_BLOCKS && solid <= MAX_SOLIDS
+  return solid > HOUSE_SECTION_CAPACITY && solid <= MAX_SOLIDS
 }, 'Layout must cover its full volume with 101–600 solid blocks')
 
 export const MinecraftHouseProjectImportInput = z.strictObject({
@@ -78,8 +79,8 @@ function sectionLayout({ start, end }: Box, full: WholeLayout) {
 function partition(layout: WholeLayout, solidIn: ReturnType<typeof countSolidIn>, zone?: ImportZone) {
   const memo = new Map<string, Box[] | null>()
   const lowerBound = (box: Box, solid: number) => Math.max(
-    Math.ceil(solid / MINECRAFT_HOUSE_MAX_BLOCKS),
-    axes.reduce((count, axis) => count * Math.ceil((box.end[axis] - box.start[axis]) / MINECRAFT_HOUSE_MAX_SIDE), 1),
+    Math.ceil(solid / HOUSE_SECTION_CAPACITY),
+    axes.reduce((count, axis) => count * Math.ceil((box.end[axis] - box.start[axis]) / SECTION_SIDE), 1),
   )
   function find(box: Box): Box[] | null {
     const { start, end } = box

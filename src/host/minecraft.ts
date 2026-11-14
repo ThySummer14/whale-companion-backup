@@ -9,7 +9,7 @@ import { MINECRAFT_OWNER_MESSAGES, minecraftOwnerEventKey, minecraftOwnerEvents,
 import { CAMP_GATHER_MAX_MS, CAMP_VISIT_GATHER_TASK_PREFIX, MinecraftCampGatherOffer, MinecraftCampGatherReceipt, MinecraftCampGatherRequest } from '../core/minecraft-gather.ts'
 import { MinecraftHouseLayout, MinecraftHousePreview, MinecraftHouseReceipt, MinecraftHouseRecovery, MinecraftHouseRequest,
   minecraftHouseMaterials, minecraftHouseReceiptMatches, minecraftHouseRecoveryDecision,
-  type MinecraftHouseDraft, type MinecraftHouseRevisionInput, type MinecraftHouseSitePreview, type MinecraftHousesView } from '../core/minecraft-house.ts'
+  type MinecraftHouseDraft, type MinecraftHouseMaterial, type MinecraftHouseRevisionInput, type MinecraftHouseSitePreview, type MinecraftHousesView } from '../core/minecraft-house.ts'
 import { MINECRAFT_HOUSE_CAPABILITY, MINECRAFT_HOUSE_EVENT, MINECRAFT_HOUSE_RECOVERY_EVENT,
   MINECRAFT_HOUSE_RECOVERY_PREFIX, minecraftHouseBuildSummary } from '../core/minecraft-house-repository.ts'
 import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY, HOUSE_PROJECT_SUPPLY_CAPABILITY, HOUSE_PROJECT_SUPPLY_EVENT,
@@ -49,7 +49,7 @@ const HOUSE_PREVIEW_TTL_MS = 2 * 60_000
 const HOUSE_PROJECT_PLAN_SWEEP_MS = 90_000
 const HOUSE_RECOVERY_PROBE_MS = 25_000
 const HOUSE_RECOVERY_VERIFY_MS = 45_000
-const HOUSE_CELL_NAMES = { oak_planks: '橡木木板', spruce_planks: '云杉木板', cobblestone: '圆石', glass: '玻璃' } as const
+const HOUSE_CELL_NAMES = { oak_planks: '橡木木板', spruce_planks: '云杉木板', cobblestone: '圆石', glass: '玻璃', cherry_planks: '樱花木板', pink_concrete: '粉色混凝土', smooth_sandstone: '平滑砂岩', dark_oak_planks: '深色橡木木板', lantern: '灯笼', cherry_leaves: '樱花树叶' } as const
 const CampVisitId = z.uuid()
 const CampVisitStarted = z.strictObject({ visitId: CampVisitId, online: z.literal(true), atCamp: z.literal(true) })
 const CampVisitEnded = z.strictObject({ visitId: CampVisitId, online: z.literal(false), confirmed: z.literal(true) })
@@ -1655,7 +1655,7 @@ export class MinecraftService {
     const placed = journal.filter(entry => entry.outcome === 'placed')
     if (!placed.length || placed.length > limit.placed || placed.some(entry =>
       !entry.settledAt || !this.verifiesRecoveryCell(sourceTaskId, request.layout, entry.taskId, entry))) return
-    const consumed: MinecraftHouseReceipt['consumed'] = {}
+    const consumed: Partial<Record<MinecraftHouseMaterial, number>> = {}
     for (const { material } of placed) consumed[material] = (consumed[material] ?? 0) + 1
     return MinecraftHouseReceipt.parse({ built: true, zoneId: request.zone.id, checked: request.layout.blocks.length, placed: placed.length, consumed })
   }

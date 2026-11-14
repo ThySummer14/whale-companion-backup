@@ -11,12 +11,12 @@ import { CompanionStore } from '../src/core/store.ts'
 const layout = { width: 2, height: 2, depth: 2, blocks: 'oscg..o.' }
 const zone = { id: randomUUID(), dimension: 'minecraft:overworld', x: 1, y: 70, z: 3, radius: 4 }
 
-test('a blueprint is a strict bounded y,z,x volume with one to 100 solid blocks', () => {
+test('a blueprint is a strict bounded y,z,x volume with one to 20000 solid blocks', () => {
   assert.deepEqual(MinecraftHouseLayout.parse(layout), layout)
   assert.equal(MinecraftHouseLayout.safeParse({ width: 5, height: 5, depth: 5, blocks: 'o'.repeat(100) + '.'.repeat(25) }).success, true)
   for (const change of [{ width: 0 }, { depth: 6 }, { height: 1.5 }, { blocks: '........' }, { blocks: 'oscg..o' },
     { blocks: 'oscg...\n' }, { blocks: 'oscg..oX' }, { filename: 'reference.png' },
-    { width: 5, height: 5, depth: 5, blocks: 'o'.repeat(101) + '.'.repeat(24) }]) {
+    { width: 64, height: 64, depth: 64, blocks: 'o'.repeat(20001) + '.'.repeat(262144 - 20001) }]) {
     assert.equal(MinecraftHouseLayout.safeParse({ ...layout, ...change }).success, false, JSON.stringify(change))
   }
   assert.equal(MinecraftHouseRequest.safeParse({ zone: { ...zone, radius: 0 }, layout }).success, false)
@@ -138,7 +138,7 @@ test('preview and receipts preserve readback and material proofs, including a no
   assert.equal(MinecraftHousePreview.safeParse({ ready: true, checked: 8 }).success, true)
   assert.equal(MinecraftHousePreview.safeParse({ ready: false, checked: 2, reason: 'homebuild-obstructed' }).success, true)
   for (const invalid of [{ ready: true, checked: 0 }, { ready: true, checked: 8, reason: 'homebuild-obstructed' },
-    { ready: false, checked: 1, reason: 'untrusted world location' }, { ready: false, checked: 126 }]) {
+    { ready: false, checked: 1, reason: 'untrusted world location' }, { ready: false, checked: 262145 }]) {
     assert.equal(MinecraftHousePreview.safeParse(invalid).success, false)
   }
   const receipt = { built: true, zoneId: zone.id, checked: 8, placed: 2, consumed: { oak_planks: 1, spruce_planks: 1 } }
@@ -177,7 +177,7 @@ test('the revision input accepts only existing palette blocks and a safe expecte
   assert.deepEqual(MinecraftHouseRevisionInput.parse({ expectedRevision: 0, blocks: layout.blocks }),
     { expectedRevision: 0, blocks: layout.blocks })
   for (const patch of [{ expectedRevision: -1 }, { expectedRevision: 0.5 }, { expectedRevision: Number.MAX_SAFE_INTEGER + 1 },
-    { blocks: 'x' }, { blocks: '' }, { blocks: 'o'.repeat(126) }, { width: 3 }, { attachmentId: 'another-image' }]) {
+    { blocks: 'x' }, { blocks: '' }, { blocks: 'o'.repeat(262145) }, { width: 3 }, { attachmentId: 'another-image' }]) {
     assert.equal(MinecraftHouseRevisionInput.safeParse({ expectedRevision: 0, blocks: layout.blocks, ...patch }).success, false)
   }
 })

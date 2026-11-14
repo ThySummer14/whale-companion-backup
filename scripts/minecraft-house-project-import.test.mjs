@@ -172,7 +172,7 @@ for (const [reason, value] of [
   ['string dimension', { ...valid, layout: { ...valid.layout, depth: '5' } }],
   ['missing cells', { ...valid, layout: { ...valid.layout, blocks: valid.layout.blocks.slice(1) } }],
   ['extra cells', { ...valid, layout: { ...valid.layout, blocks: valid.layout.blocks + '.' } }],
-  ['unsupported block symbols', { ...valid, layout: { ...valid.layout, blocks: 'd' + valid.layout.blocks.slice(1) } }],
+  ['unsupported block symbols', { ...valid, layout: { ...valid.layout, blocks: 'X' + valid.layout.blocks.slice(1) } }],
   ['raw newlines in a canonical block sequence', { ...valid, layout: { ...valid.layout, blocks: '\n' + valid.layout.blocks.slice(1) } }],
   ['untrusted layout fields', { ...valid, layout: { ...valid.layout, origin: [0, 0, 0] } }],
   ['untrusted root fields', { ...valid, autoBuild: true }],

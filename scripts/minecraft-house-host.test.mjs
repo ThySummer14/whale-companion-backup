@@ -10,6 +10,9 @@ import { HOUSE_COMPLETION_TASK_PREFIX } from '../src/core/minecraft-house-verifi
 import { MINECRAFT_HOUSE_EVENT, minecraftHouseBuildSummary } from '../src/core/minecraft-house-repository.ts'
 import { MINECRAFT_RECOVERY_CONTEXT } from '../src/core/model.ts'
 import { registerHttp } from '../src/host/http.ts'
+import { registerDeviceHttp } from '../src/host/device-http.ts'
+import { DeviceService } from '../src/host/devices.ts'
+import { gunzipSync } from 'node:zlib'
 import { MinecraftService } from '../src/host/minecraft.ts'
 import { verifiedMinecraftMilestone } from '../src/host/minecraft-milestones.ts'
 import { HOUSE_DRAFT_TOOL, registerMinecraftHouseTool } from '../src/host/minecraft-house-tool.ts'
@@ -96,14 +99,14 @@ test('house draft binds only the explicit current owner turn and its actual imag
   begin(7, message('layered', '请帮我照这张图盖一间木屋', [image]))
   await assert.rejects(execute(7, dimensions), /exactly one of facade, layers or blocks/u)
   await assert.rejects(execute(7, { ...layered, blocks }), /exactly one of facade, layers or blocks/u)
-  await assert.rejects(execute(7, { ...layered, width: 6 }), /width: use an integer from 1 to 5/u)
+  await assert.rejects(execute(7, { ...layered, width: 65 }), /width: use an integer from 1 to 64/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co', 'o.']] }), /expected 2 layers bottom to top, received 1/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co'], ['.g', 'g.']] }), /layers\[0\]: expected 2 rows north to south/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co', 'o.'], ['.g', 'gz']] }), /layers\[1\]\[1\]: use exactly 2 characters/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co', 'o.'], ['.g', 'g']] }), /layers\[1\]\[1\]: use exactly 2 characters/u)
   await assert.rejects(execute(7, { ...dimensions, blocks: 'co' }), /expected 8 cells including air, received 2/u)
-  await assert.rejects(execute(7, { ...dimensions, blocks: '........' }), /one to 100 solid blocks/u)
-  await assert.rejects(execute(7, { ...dimensions, width: 5, depth: 5, height: 5, blocks: 'o'.repeat(125) }), /one to 100 solid blocks/u)
+  await assert.rejects(execute(7, { ...dimensions, blocks: '........' }), /one to 20000 solid blocks/u)
+  await assert.rejects(execute(7, { ...dimensions, width: 64, depth: 64, height: 64, blocks: 'o'.repeat(20001) + '.'.repeat(262144 - 20001) }), /one to 20000 solid blocks/u)
   assert.equal(store.minecraftHouses.list().length, 2)
   emit('step/end', { turn: 7, step: 1 })
   emit('step/start', { turn: 7, step: 2 })
@@ -860,4 +863,54 @@ test('zone revocation cancels a live house attempt and prevents progress or reus
     assert.equal(h.state.calls.some(call => call.path === '/stop'), true)
     await assert.rejects(h.preview(), /build-zone-not-found/u)
   } finally { release.resolve() }
+})
+
+test('paired Activity sees old drafts, downloads the same revision, and only builds after fresh approval', async t => {
+  const h = await fixture(t)
+  let handler
+  let origin
+  const ctx = { webServer: { getOrigin: () => origin, register: route => {
+    if (route.path === '/companion-device/api') handler = route.handler
+    return () => {}
+  } } }
+  const devices = new DeviceService(ctx, h.store)
+  const release = registerDeviceHttp(ctx, { store: h.store, view: () => ({}), minecraft: h.service }, devices)
+  const server = createServer(handler)
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  origin = 'http://127.0.0.1:' + server.address().port
+  t.after(async () => {
+    release()
+    devices.close()
+    server.closeAllConnections()
+    await new Promise(resolve => server.close(resolve))
+  })
+  const { credential } = devices.redeem(devices.createOffer({ routes: [origin] }).link)
+  const api = '/companion-device/api/'
+  const root = 'minecraft/approvals/' + h.draft.id
+  const get = (path, auth = credential) => fetch(origin + api + path, { headers: { authorization: auth } })
+  const post = (action, payload) => fetch(origin + api + root + '/' + action, {
+    method: 'POST', headers: { authorization: credential, 'content-type': 'application/json' }, body: JSON.stringify(payload),
+  })
+  const approved = { zoneId: h.zone.id, revision: 0 }
+  const state = await (await get('state')).json()
+  assert.equal(state.houseApprovals.items[0].name, '雨后木屋')
+  assert.deepEqual(state.houseApprovals.items[0].layout, layout)
+  assert.equal(state.houseApprovals.items[0].reference, undefined)
+  assert.equal((await get(root + '/projection?revision=0', 'invalid')).status, 401)
+  const file = await get(root + '/projection?revision=0')
+  assert.equal(file.status, 200)
+  assert.match(file.headers.get('content-disposition'), /r0\.litematic/u)
+  assert.ok(gunzipSync(Buffer.from(await file.arrayBuffer())).includes(Buffer.from('BlockStatePalette')))
+  const preview = await (await post('preview', approved)).json()
+  assert.ok(preview.previewId)
+  assert.equal(h.state.calls.some(call => call.path === '/house/build'), false)
+  h.service.reviseHouse(h.draft.id, { expectedRevision: 0, blocks: 'oco..gg.' })
+  assert.equal((await post('build', { ...approved, previewId: preview.previewId })).status, 409)
+  assert.equal((await get(root + '/projection?revision=0')).status, 409)
+  const revised = { zoneId: h.zone.id, revision: 1 }
+  const fresh = await (await post('preview', revised)).json()
+  const done = await post('build', { ...revised, previewId: fresh.previewId })
+  assert.equal(done.status, 200)
+  assert.equal((await done.json()).status, 'built')
+  assert.equal(h.state.calls.filter(call => call.path === '/house/build').length, 1)
 })

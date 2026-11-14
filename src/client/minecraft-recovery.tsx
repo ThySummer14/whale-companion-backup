@@ -9,7 +9,7 @@ const OBSERVATION: Record<NonNullable<Decision['observed']>, string> = {
   unavailable: '本次现场复查暂时无法完成',
 }
 const MATERIALS: Record<NonNullable<Decision['placed']>['material'], string> = {
-  oak_planks: '橡木木板', spruce_planks: '云杉木板', cobblestone: '圆石', glass: '玻璃',
+  oak_planks: '橡木木板', spruce_planks: '云杉木板', cobblestone: '圆石', glass: '玻璃', cherry_planks: '樱花木板', pink_concrete: '粉色混凝土', smooth_sandstone: '平滑砂岩', dark_oak_planks: '深色橡木木板', lantern: '灯笼', cherry_leaves: '樱花树叶',
 }
 
 export function MinecraftRecoveryOutcome({ decision }: { decision: Decision }) {
