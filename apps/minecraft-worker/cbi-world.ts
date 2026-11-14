@@ -7,6 +7,7 @@ import type { Stats } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod'
+import type { MinecraftAuthorizedZone } from '../../src/core/minecraft-supply.ts'
 import { CAMP_GATHER_MAX_MS, MinecraftCampGatherOffer, MinecraftCampGatherReceipt, MinecraftCampGatherRequest, minecraftProjectGatherEligible } from '../../src/core/minecraft-gather.ts'
 import { MINECRAFT_HOUSE_CANDIDATE_LIMIT, MinecraftHouseCellBlockedReason, MinecraftHouseCellCandidates, MinecraftHouseCellReceipt, MinecraftHouseCellRequest, minecraftHouseCellTarget } from '../../src/core/minecraft-house-cell.ts'
 import { MINECRAFT_HOUSE_BLOCKS, MinecraftHousePreview, MinecraftHouseReceipt, MinecraftHouseRequest, minecraftHouseCells, minecraftHouseReceiptMatches, type MinecraftHouseMaterial } from '../../src/core/minecraft-house.ts'
@@ -46,7 +47,7 @@ type HouseSession = { epoch: number; dev: number; ino: number; offset: number }
 type HouseProgress = { phase: string; checked: number; placed: number; reason: string }
 const HOUSE_MATERIALS = Object.values(MINECRAFT_HOUSE_BLOCKS).filter(block => block !== 'air')
 type EntityData = Record<string, unknown> | unknown[] | string | number
-type Action = { kind: string; controller: AbortController }
+type Action = { kind: string; controller: AbortController; digTarget?: Position; unreachable?: true }
 type WardrobeModelState = { modelId: string; texture: string; mandatory: boolean; disabled: boolean }
 const campAdmission = new AsyncLocalStorage<{ world: CbiWorld; epoch: number; visitId?: string }>()
 const CampVisitStart = MinecraftSurveyPreviewRequest.extend({
@@ -206,8 +207,9 @@ export class CbiWorld extends EventEmitter {
   private readonly fifo: string
   private readonly logPath: string
   private online = false
+  private creative = false
   private connecting = false
-  private features?: { survival: boolean; safeReturn: boolean; crafting: boolean; shield: boolean; campBuilding: boolean; houseBuilding: boolean; houseRecovery: boolean; houseCellPlacement: boolean; campSurvey: boolean; campSurveyRoutes: boolean; campSurveyTrails: boolean; campGather: boolean; chatRelay: boolean }
+  private features?: { survival: boolean; safeReturn: boolean; crafting: boolean; shield: boolean; nightShelter: boolean; campBuilding: boolean; houseBuilding: boolean; houseRecovery: boolean; houseCellPlacement: boolean; campSurvey: boolean; campSurveyRoutes: boolean; campSurveyTrails: boolean; campGather: boolean; chatRelay: boolean }
   private chatRelayDemandUntil = 0
   private chatRelayRenewAt = 0
   private chatRelayMayBeActive = false
@@ -231,6 +233,7 @@ export class CbiWorld extends EventEmitter {
   private wardrobePending = false
   private wardrobeLast?: MinecraftWardrobeView['last']
   private connectionEpoch = 0
+  private pendingDeath?: string
   private reflexEnabled = !this.campPaused
   private action?: Action
   private avoidTargets = new Set<string>()
@@ -351,6 +354,7 @@ export class CbiWorld extends EventEmitter {
         safeReturn: this.features?.safeReturn ?? false,
         crafting: this.features?.crafting ?? false,
         shield: this.features?.shield ?? false,
+        nightShelter: this.features?.nightShelter ?? false,
         campBuilding: this.features?.campBuilding ?? false,
         houseBuilding: this.features?.houseBuilding ?? false,
         houseProjects: this.online && this.features?.houseBuilding === true,
@@ -414,18 +418,32 @@ export class CbiWorld extends EventEmitter {
         const presence = /^([a-zA-Z0-9_]{3,16}) (joined|left) the game$/u.exec(message)
         const player = presence?.[1]?.toLowerCase()
         if (player === this.botName && presence?.[2] === 'joined' && !this.online) {
+          this.pendingDeath = undefined
           this.online = true
           if (this.campPaused) void this.pauseCamp().catch(() => {})
           else if (!this.connecting && !this.visit && !this.visitStart) void this.withCampAction(() => this.connect()).catch(() => {})
         }
-        if (message.startsWith(`${this.botName} was slain `) || message === `${this.botName} died`) {
-          this.record('player.death', { message: line.slice(-300) })
+        const deathDisconnect = `${this.botName} lost connection: ${this.botName} died`
+        const deathText = message.startsWith(`${this.botName} `) ? message.slice(this.botName.length + 1) : ''
+        if (/^(?:drowned|died|was (?:slain|shot|killed|blown up|pricked|impaled)|fell|hit the ground|tried to swim|went up in flames|burned|starved|suffocated)\b/u.test(deathText)) {
+          this.pendingDeath = message.slice(0, 240)
+        }
+        if (message === deathDisconnect) {
+          this.record('player.death', { message: this.pendingDeath ?? `${this.botName} died`,
+            position: this.observation?.position, oxygen: this.observation?.oxygen })
+          this.pendingDeath = undefined
         }
         if (player === this.botName && presence?.[2] === 'left') {
           this.markOffline()
         }
         if (new RegExp(`<${this.botName}> (?:任务失败|没有食物|缺少工具|找不到可行路径|卡住|目标不可用)`, 'iu').test(line)) {
           this.record('world.alert', { message: line.slice(-300) })
+          const action = this.action
+          const target = action?.digTarget
+          if (action?.kind === 'dig' && target &&
+              message === `<${this.botName}> 任务失败：无法到达目标方块: ${target.x} ${target.y} ${target.z}`) {
+            action.unreachable = true
+          }
         }
         if (new RegExp(`<${this.owner}> .*?\\[CBI\\]`, 'iu').test(line)) this.record('owner.feedback', { message: line.slice(-300) })
         if (player === this.owner.toLowerCase()) {
@@ -442,6 +460,7 @@ export class CbiWorld extends EventEmitter {
     const wasOnline = this.online
     this.connectionEpoch++
     this.wardrobeSupport = undefined
+    this.pendingDeath = undefined
     this.action?.controller.abort()
     this.online = false
     this.features = undefined
@@ -711,12 +730,13 @@ export class CbiWorld extends EventEmitter {
     }
     const campSurvey = survival && commands.includes('survey')
     const campSurveyRoutes = campSurvey && commands.includes('surveyroute')
-    const houseBuilding = survival && commands.includes('homebuild')
+    const houseBuilding = (survival || this.creative) && commands.includes('homebuild')
     this.features = {
       survival,
       safeReturn: survival && commands.includes('return'),
       crafting: survival && commands.includes('craft'),
       shield: survival && commands.includes('shield'),
+      nightShelter: commands.includes('nightbed') && commands.includes('nightshelter'),
       campBuilding: survival && commands.includes('buildcamp'),
       houseBuilding,
       houseRecovery: houseBuilding && commands.includes('homebuildrecover'),
@@ -1100,7 +1120,7 @@ export class CbiWorld extends EventEmitter {
     return { resumed: true }
   }
 
-  async connect(): Promise<unknown> {
+  async connect(atOwner = false): Promise<unknown> {
     if (this.visit || this.visitStart) throw new Error('minecraft-camp-visit-busy')
     if (this.connecting) throw new Error('connection-busy')
     this.connecting = true
@@ -1109,7 +1129,9 @@ export class CbiWorld extends EventEmitter {
       try { return await this.connectReady() } catch (error) {
         if (!(error instanceof Error) || error.message !== 'minecraft-offline') throw error
       }
-      await this.send(`player ${this.botName} spawn`, new RegExp(`${this.botName}(?:\\[local\\])? (?:logged in with entity id|joined the game)|already (?:logged in|online)`, 'iu'), 15_000)
+      if (atOwner && !await this.positionOf(this.owner)) throw new Error('owner-not-visible')
+      const spawn = `${atOwner ? `execute at ${this.owner} run ` : ''}player ${this.botName} spawn`
+      await this.send(spawn, new RegExp(`${this.botName}(?:\\[local\\])? (?:logged in with entity id|joined the game)|already (?:logged in|online)`, 'iu'), 15_000)
       return await this.connectReady()
     } catch (error) {
       this.lastError = error instanceof Error ? error.message : String(error)
@@ -1242,13 +1264,16 @@ export class CbiWorld extends EventEmitter {
     }
   }
 
-  private async waitForArrival(target: Position, action: Action): Promise<Record<string, unknown>> {
+  private async waitForArrival(target: Position, action: Action, origin: Position): Promise<Record<string, unknown>> {
     const deadline = Date.now() + 45_000
     const notBefore = Date.now() + 1500
     while (Date.now() < deadline) {
       action.controller.signal.throwIfAborted()
       const observation = await this.observe()
       const current = observation.position as Position | undefined
+      if (typeof observation.oxygen === 'number' && observation.oxygen < 280) throw new Error('move-air-falling')
+      if (current && Math.hypot(current.x - origin.x, current.z - origin.z) >
+        Math.hypot(target.x - origin.x, target.z - origin.z) + 8) throw new Error('move-route-diverged')
       if (current && Math.floor(current.x) === target.x && Math.floor(current.y) === target.y && Math.floor(current.z) === target.z) return observation
       const status = typeof observation.cbiStatus === 'string' ? observation.cbiStatus : ''
       if (Date.now() >= notBefore && (status.includes('没有执行中的') || /无法|失败/iu.test(status))) {
@@ -1274,7 +1299,7 @@ export class CbiWorld extends EventEmitter {
     try {
       const receipt = await this.cbi(`goto ${target.x} ${target.y} ${target.z}`)
       if (!receipt.includes('正在计算到')) throw new Error('move-unconfirmed')
-      const observation = await this.waitForArrival(target, action)
+      const observation = await this.waitForArrival(target, action, current)
       this.action = undefined
       this.record('action.finished', { kind: 'move', target })
       return { moved: true, target, observation }
@@ -1288,6 +1313,117 @@ export class CbiWorld extends EventEmitter {
     }
   }
 
+  async teleport(input: Position): Promise<unknown> {
+    const target = z.object({ x: z.number().int().min(-30_000_000).max(30_000_000), y: z.number().int().min(-64).max(320), z: z.number().int().min(-30_000_000).max(30_000_000) }).parse(input)
+    if (!this.online) throw new Error('minecraft-offline')
+    const dimension = await this.data(this.botName, 'Dimension')
+    if (dimension !== 'minecraft:overworld') throw new Error('teleport-dimension-refused')
+    const action = await this.startAction('teleport')
+    try {
+      await this.writeConsole(`tp ${this.botName} ${target.x} ${target.y} ${target.z}`)
+      const deadline = Date.now() + 8000
+      let current: Position | undefined
+      while (Date.now() < deadline) {
+        current = await this.positionOf(this.botName)
+        if (current && Math.abs(current.x - target.x) <= 0.5 && Math.abs(current.y - target.y) <= 0.5 && Math.abs(current.z - target.z) <= 0.5) break
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      if (!current || Math.abs(current.x - target.x) > 0.5 || Math.abs(current.y - target.y) > 0.5 || Math.abs(current.z - target.z) > 0.5) throw new Error('teleport-unconfirmed')
+      this.action = undefined
+      this.record('action.finished', { kind: 'teleport', target })
+      return { teleported: true, target, position: current }
+    } catch (error) {
+      this.action = undefined
+      this.record('action.failed', { kind: 'teleport', target, error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
+  }
+
+  async setGameMode(mode: 'creative' | 'survival'): Promise<unknown> {
+    if (!this.online) throw new Error('minecraft-offline')
+    await this.writeConsole(`gamemode ${mode} ${this.botName}`)
+    const expected = mode === 'creative' ? 1 : 0
+    const deadline = Date.now() + 8000
+    let actual: number | undefined
+    while (Date.now() < deadline) {
+      actual = numeric(await this.data(this.botName, 'playerGameType'))
+      if (actual === expected) break
+      await new Promise(resolve => setTimeout(resolve, 250))
+    }
+    if (actual !== expected) throw new Error('gamemode-unconfirmed')
+    this.creative = mode === 'creative'
+    this.record('gamemode.changed', { mode })
+    return { mode }
+  }
+
+  async inspectTerrain(targets: Position[], signal: AbortSignal): Promise<unknown> {
+    const origin = await this.positionOf(this.botName, signal)
+    if (!this.online || !origin) throw new Error('minecraft-offline')
+    const dimension = await this.data(this.botName, 'Dimension', signal)
+    if (typeof dimension !== 'string' || !/^[a-z0-9_:.-]{1,64}$/u.test(dimension)) throw new Error('terrain-dimension-unconfirmed')
+    if (targets.some(p => Math.hypot(p.x - origin.x, p.z - origin.z) > 32 || Math.abs(p.y - origin.y) > 12)) {
+      throw new Error('terrain-out-of-range')
+    }
+    const epoch = this.connectionEpoch
+    const test = async (condition: string) => {
+      signal.throwIfAborted()
+      if (!this.online || this.connectionEpoch !== epoch) throw new Error('minecraft-offline')
+      const output = await this.send(`execute in ${dimension} ${condition}`, CAMP_VISIT_BLOCK_CHECK, 4000, 0, signal, () => {})
+      return CAMP_VISIT_BLOCK_CHECK.exec(output)?.[1] === 'passed'
+    }
+    const readings = []
+    for (const p of targets) {
+      const at = `${p.x} ${p.y} ${p.z}`
+      const below = `${p.x} ${p.y - 1} ${p.z}`
+      const head = `${p.x} ${p.y + 1} ${p.z}`
+      if (!await test(`if loaded ${at}`)) {
+        readings.push({ ...p, loaded: false })
+        continue
+      }
+      const headClear = await test(`if block ${head} minecraft:air`)
+      const air = headClear && await test(`if block ${at} minecraft:air`)
+      const dryGround = await test(`if block ${below} #minecraft:dirt`) || await test(`if block ${below} minecraft:stone`)
+      const water = await test(`if block ${at} minecraft:water`) || await test(`if block ${below} minecraft:water`)
+      const plains = await test(`if biome ${at} minecraft:plains`)
+      const shortGrass = !air && headClear && await test(`if block ${at} minecraft:short_grass`)
+      readings.push({ ...p, loaded: true, clear: air, dryGround, water, plains, shortGrass })
+    }
+    return { origin, readings }
+  }
+
+  async surface(signal: AbortSignal): Promise<unknown> {
+    this.assertCampAdmission()
+    if (!this.online) throw new Error('minecraft-offline')
+    const before = numeric(await this.data(this.botName, 'Air', signal))
+    if (before === undefined) throw new Error('surface-air-unconfirmed')
+    if (before >= 300) return { surfaced: false, reason: 'air-already-full', oxygen: before }
+    const action = await this.startAction('surface', false)
+    const guard = AbortSignal.any([signal, action.controller.signal])
+    const epoch = this.connectionEpoch
+    try {
+      await this.writeConsole(`player ${this.botName} jump continuous`, () => {
+        guard.throwIfAborted()
+        this.assertCampAdmission()
+      })
+      const deadline = Date.now() + 8_000
+      while (Date.now() < deadline) {
+        const oxygen = numeric(await this.data(this.botName, 'Air', guard))
+        if (oxygen === undefined) throw new Error('surface-air-unconfirmed')
+        if (oxygen >= 280 && oxygen > before) {
+          this.record('action.finished', { kind: 'surface', oxygenBefore: before, oxygen })
+          return { surfaced: true, oxygenBefore: before, oxygen, position: await this.positionOf(this.botName, guard) }
+        }
+        await delay(200)
+      }
+      throw new Error('surface-timeout')
+    } finally {
+      if (this.online && this.connectionEpoch === epoch && this.action === action) {
+        await this.writeConsole(`player ${this.botName} stop`).catch(() => {})
+        this.action = undefined
+      }
+    }
+  }
+
   private async cachedPositions(blocks: readonly string[]): Promise<Position[]> {
     const output = await this.cbi(`find ${blocks.join(' ')}`, this.botName, 250, /\[CBI\] (?:查找完成 \d+|.*?(?:错误|未知指令|找不到))/u)
     const results: Position[] = []
@@ -1295,12 +1431,143 @@ export class CbiWorld extends EventEmitter {
     return results.filter((item, index) => results.findIndex(other => other.x === item.x && other.y === item.y && other.z === item.z) === index)
   }
 
-  async dig(name = 'oak_log'): Promise<unknown> {
+  async findBeds(signal: AbortSignal): Promise<unknown> {
+    const origin = await this.positionOf(this.botName, signal)
+    if (!this.online || !origin) throw new Error('minecraft-offline')
+    const beds = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray',
+      'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'].map(color => `${color}_bed`)
+    const distance = (p: Position) => Math.hypot(p.x - origin.x, p.y - origin.y, p.z - origin.z)
+    const dimension = await this.data(this.botName, 'Dimension', signal)
+    if (dimension !== 'minecraft:overworld') throw new Error('night-bed-overworld-required')
+    const nearby = (await this.cachedPositions(beds)).filter(p => distance(p) <= 32).sort((a, b) => distance(a) - distance(b))
+    const found = []
+    for (const p of nearby.slice(0, 12)) {
+      if (await this.block(p, '#minecraft:beds[part=head]', dimension, signal)) found.push(p)
+      if (found.length >= 4) break
+    }
+    return { origin, found }
+  }
+
+  private async nightCommand(command: string, terminal: string, signal: AbortSignal): Promise<string> {
+    const prefix = `^\\[[^\\r\\n\\]]+\\] \\[Server thread/INFO\\]: CBI feedback sender=${this.botName} target=${this.botName} message="\\[CBI\\] `
+    const line = new RegExp(prefix + `(${terminal}|错误: night-[a-z-]+)"\\r?$`, 'mu')
+    const receipt = await this.send(`execute as ${this.botName} run tell ${this.botName} cbi ${command}`, line, 15_000, 0, signal, () => {})
+    const message = line.exec(receipt)?.[1]
+    if (!message) throw new Error('night-receipt-unconfirmed')
+    if (message.startsWith('错误: ')) throw new Error(message.slice('错误: '.length))
+    return message
+  }
+
+  async useNightBed(target: Position, place: boolean, signal: AbortSignal): Promise<unknown> {
+    if (!this.features?.nightShelter) throw new Error('night-shelter-unavailable')
+    const action = await this.startAction('night-bed', false)
+    const abort = AbortSignal.any([signal, action.controller.signal])
+    try {
+      const command = `nightbed ${place ? 'place ' : ''}${target.x} ${target.y} ${target.z}`
+      const result = await this.nightCommand(command, 'nightbed (?:sleeping|refused|placed -?\\d+ -?\\d+ -?\\d+)', abort)
+      if (place) {
+        const [, outcome, x, y, z] = result.split(' ')
+        const placed = outcome === 'placed'
+        const head = placed ? { x: Number(x), y: Number(y), z: Number(z) } : undefined
+        this.record('night.bed-placed', { target, placed, head })
+        return { placed, target, head, ...(!placed && { reason: 'bed-placement-refused' }) }
+      }
+      const sleeping = result === 'nightbed sleeping'
+      this.record('night.bed', { target, sleeping })
+      return { sleeping, target, ...(!sleeping && { reason: 'bed-use-refused' }) }
+    } finally {
+      if (this.action === action) this.action = undefined
+    }
+  }
+
+  async nightCover(phase: 'sites' | 'status' | 'enter' | 'leave', signal: AbortSignal): Promise<unknown> {
+    if (!this.features?.nightShelter) throw new Error('night-shelter-unavailable')
+    const coordinates = '-?\\d+ -?\\d+ -?\\d+'
+    if (phase === 'sites') {
+      const result = await this.nightCommand('nightshelter sites', `nightshelter sites (?:none|${coordinates}(?:,${coordinates}){0,5})`, signal)
+      const values = result.slice('nightshelter sites '.length)
+      const found = values === 'none' ? [] : values.split(',').map(value => {
+        const [x, y, z] = value.split(' ').map(Number)
+        return { x, y, z }
+      })
+      return { found }
+    }
+    if (phase === 'status') {
+      const result = await this.nightCommand('nightshelter status', `nightshelter (?:none|(?:covered|shaft) ${coordinates})`, signal)
+      const [, status, x, y, z] = result.split(' ')
+      return { status, ...(x !== undefined && { surface: { x: Number(x), y: Number(y), z: Number(z) } }) }
+    }
+    const action = await this.startAction('night-shelter', false)
+    const abort = AbortSignal.any([signal, action.controller.signal])
+    try {
+      const verb = phase === 'enter' ? 'enter' : 'open'
+      const result = await this.nightCommand(`nightshelter ${verb}`, `nightshelter (?:(?:covered|opened) ${coordinates}|failed [a-z-]+)`, abort)
+      const [, status, x, y, z] = result.split(' ')
+      if (status === 'failed') throw new Error(`night-shelter-${x}`)
+      const surface = { x: Number(x), y: Number(y), z: Number(z) }
+      this.record('night.shelter', { status, surface })
+      if (phase === 'enter') return { status, surface }
+      this.action = undefined
+      return { status, surface, exit: await this.returnToSafety(signal) }
+    } catch (error) {
+      this.record('night.shelter-failed', { phase, error: error instanceof Error ? error.message : String(error) })
+      if (this.online && this.action === action) await this.cbi('stop').catch(() => {})
+      throw error
+    } finally {
+      if (this.action === action) this.action = undefined
+    }
+  }
+
+  async findWood(name: string, signal: AbortSignal, maxAbove = 12): Promise<unknown> {
+    if (!(LOGS as readonly string[]).includes(name)) throw new Error('unsupported-gather-target')
+    const origin = await this.positionOf(this.botName, signal)
+    if (!this.online || !origin) throw new Error('minecraft-offline')
+    const distance = (p: Position) => Math.hypot(p.x - origin.x, p.z - origin.z)
+    const reachDistance = (p: Position) => Math.hypot(distance(p), p.y - origin.y - 1.62)
+    const candidates = (await this.cachedPositions([name])).filter(p => distance(p) <= 48 && p.y - origin.y <= maxAbove && origin.y - p.y <= 12)
+      .sort((a, b) => reachDistance(a) - reachDistance(b)).slice(0, 12)
+    const found = []
+    for (const candidate of candidates) {
+      signal.throwIfAborted()
+      if (await this.block(candidate, `minecraft:${name}`, undefined, signal)) found.push(candidate)
+    }
+    return { origin, block: name, found }
+  }
+
+  async clearGrass(zone: z.infer<typeof MinecraftAuthorizedZone>, target: Position, signal: AbortSignal): Promise<unknown> {
+    const current = await this.positionOf(this.botName, signal)
+    if (!this.online || !current) throw new Error('minecraft-offline')
+    if (target.y !== zone.y || Math.abs(target.x - zone.x) > zone.radius || Math.abs(target.z - zone.z) > zone.radius ||
+        Math.hypot(current.x - target.x, current.y - target.y, current.z - target.z) > 12 ||
+        await this.data(this.botName, 'Dimension', signal) !== zone.dimension) throw new Error('grass-out-of-range')
+    if (!await this.block(target, 'minecraft:short_grass', zone.dimension, signal)) return { cleared: false, reason: 'not-short-grass' }
+    const action = await this.startAction('clear-grass')
+    const guard = AbortSignal.any([action.controller.signal, signal])
+    try {
+      if (!await this.block(target, 'minecraft:short_grass', zone.dimension, guard)) return { cleared: false, reason: 'not-short-grass' }
+      const receipt = await this.cbi(`break ${target.x} ${target.y} ${target.z}`, this.botName, 0, /开始破坏/u, guard, () => {})
+      if (!receipt.includes(`开始破坏 ${target.x} ${target.y} ${target.z}`)) throw new Error('grass-break-unconfirmed')
+      const deadline = Date.now() + 10_000
+      while (Date.now() < deadline) {
+        guard.throwIfAborted()
+        if (await this.block(target, 'minecraft:air', zone.dimension, guard)) return { cleared: true, target }
+        await delay(300)
+      }
+      throw new Error('grass-break-unconfirmed')
+    } finally {
+      if (this.action === action) {
+        await this.cbi('stop').catch(() => {})
+        this.action = undefined
+      }
+    }
+  }
+
+  async dig(name = 'oak_log', selected?: Position): Promise<unknown> {
     if (!(LOGS as readonly string[]).includes(name)) throw new Error('unsupported-gather-target')
     if (!this.online) throw new Error('minecraft-offline')
     const current = await this.positionOf(this.botName)
     if (!current) throw new Error('minecraft-offline')
-    const candidates = (await this.cachedPositions([name])).filter(target => Math.hypot(target.x + 0.5 - current.x, target.z + 0.5 - current.z) <= 24 && Math.abs(target.y - current.y) <= 8 && !this.avoidTargets.has(`${target.x},${target.y},${target.z}`))
+    const candidates = (selected ? [selected] : await this.cachedPositions([name])).filter(target => Math.hypot(target.x + 0.5 - current.x, target.z + 0.5 - current.z) <= 24 && Math.abs(target.y - current.y) <= 8 && !this.avoidTargets.has(`${target.x},${target.y},${target.z}`))
     const leafCandidates = await this.cachedPositions(LEAVES)
     candidates.sort((a, b) => {
       const vertical = Math.abs(a.y - current.y) - Math.abs(b.y - current.y)
@@ -1337,15 +1604,26 @@ export class CbiWorld extends EventEmitter {
     }
     this.record('gather.selected', { target, naturalLeaf: evidence })
     const before = await this.observe()
+    if (typeof before.health === 'number' && before.health <= 6) throw new Error('dig-health-low')
     const count = (before.inventory as { name: string; count: number }[]).filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0)
     const action = await this.startAction('dig')
+    action.digTarget = target
     try {
+      const checkCondition = async () => {
+        action.controller.signal.throwIfAborted()
+        if (action.unreachable) throw new Error('dig-target-unreachable')
+        const health = numeric(await this.data(this.botName, 'Health', action.controller.signal))
+        if (health === undefined) throw new Error('minecraft-offline')
+        if (health <= 6 || typeof before.health === 'number' && before.health - health >= 4) throw new Error('dig-health-falling')
+        const oxygen = numeric(await this.data(this.botName, 'Air', action.controller.signal))
+        if (oxygen !== undefined && oxygen < 280) throw new Error('dig-air-falling')
+      }
       const receipt = await this.cbi(`break ${target.x} ${target.y} ${target.z}`)
       if (!receipt.includes(`开始破坏 ${target.x} ${target.y} ${target.z}`)) throw new Error('dig-unconfirmed')
       const deadline = Date.now() + 60_000
       let changed = false
       while (Date.now() < deadline) {
-        action.controller.signal.throwIfAborted()
+        await checkCondition()
         changed = await this.block(target, 'minecraft:air')
         if (changed) break
         const status = await this.cbi('status')
@@ -1357,7 +1635,7 @@ export class CbiWorld extends EventEmitter {
       const pickupDeadline = Date.now() + 12_000
       let after = count
       while (Date.now() < pickupDeadline) {
-        action.controller.signal.throwIfAborted()
+        await checkCondition()
         const state = await this.observe()
         after = (state.inventory as { name: string; count: number }[]).filter(item => item.name === name).reduce((sum, item) => sum + item.count, 0)
         if (after > count) break
@@ -1383,12 +1661,14 @@ export class CbiWorld extends EventEmitter {
     }
   }
 
-  async returnToSafety(): Promise<unknown> {
+  async returnToSafety(signal?: AbortSignal): Promise<unknown> {
+    signal?.throwIfAborted()
     if (!this.online) throw new Error('minecraft-offline')
     if (!this.features?.safeReturn) throw new Error('return-unavailable')
     const action = await this.startAction('return')
     let target: Position | undefined
     try {
+      signal?.throwIfAborted()
       const receipt = await this.cbi('return')
       const match = /开始安全回程，出口 (-?\d+), (-?\d+), (-?\d+)，预计放置 (\d+) 个方块/u.exec(receipt)
       if (!match) throw new Error('return-unconfirmed')
@@ -1396,6 +1676,7 @@ export class CbiWorld extends EventEmitter {
       target = exit
       const deadline = Date.now() + 90_000
       while (Date.now() < deadline) {
+        signal?.throwIfAborted()
         action.controller.signal.throwIfAborted()
         const observation = await this.observe()
         const current = observation.position as Position | undefined
@@ -2004,7 +2285,7 @@ export class CbiWorld extends EventEmitter {
   }
 
   async craft(name: string, supply?: { zone: ReturnType<typeof MinecraftSupplyRequest.parse>['zone']; signal: AbortSignal; prepare: boolean; visit?: true }): Promise<unknown> {
-    const allowed = [...LOGS.map(log => log.replace(/_log$/u, '_planks')), 'stick', 'crafting_table', 'wooden_pickaxe', 'stone_pickaxe', 'shield']
+    const allowed = [...LOGS.map(log => log.replace(/_log$/u, '_planks')), 'stick', 'crafting_table', 'wooden_pickaxe', 'stone_pickaxe', 'shield', 'white_bed']
     if (!allowed.includes(name)) throw new Error('craft-unsupported')
     if (!this.online) throw new Error('minecraft-offline')
     if (!this.features?.crafting) throw new Error('craft-unavailable')

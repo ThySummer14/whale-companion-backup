@@ -18,7 +18,7 @@ export function registerMinecraftTools(ctx: Context, runtime: CompanionRuntime):
       name: 'mc_status',
       description: 'Read confirmed Minecraft connection and action state, or one specific detail: authorized build zones, wardrobe choices or game lessons.',
       parameters: {
-        section: { type: 'string', enum: ['overview', 'build_zones', 'wardrobe', 'lessons', 'places'], description: 'Defaults to overview. Use places to read or name verified building locations.' },
+        section: { type: 'string', enum: ['overview', 'build_zones', 'wardrobe', 'lessons', 'places', 'houses'], description: 'Defaults to overview. Houses lists the saved plans with a separately authorized site.' },
         offset: { type: 'number', description: 'For build_zones, use nextOffset when returned.' },
       }, output,
       async execute(args, exec) {
@@ -96,26 +96,131 @@ export function registerMinecraftTools(ctx: Context, runtime: CompanionRuntime):
       async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.modelChat(args.text, exec.signal)) },
     })),
     ctx.tools.register(defineTool({
+      name: 'mc_inspect_terrain',
+      description: 'Read loaded blocks at up to eight nearby candidate feet positions. Reports actual water, two clear air blocks, dirt or stone support, and plains biome. This only observes the listed cells.',
+      parameters: {
+        targets: { type: 'array', items: { type: 'object', additionalProperties: false, properties: {
+          x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, z: { type: 'integer', required: true },
+        } }, required: true, description: 'One to eight feet coordinates within 32 horizontal and 12 vertical blocks.' },
+      }, output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.inspectTerrain(args.targets, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_find_wood',
+      description: 'Find up to twelve loaded, verified nearby logs of one species. These are block positions, not necessarily standing positions. No movement or block changes.',
+      parameters: {
+        name: { type: 'string', enum: LOGS, required: true, description: 'Log species.' },
+        maxAbove: { type: 'integer', description: 'Optional maximum number of blocks above your feet, 0–12.' },
+      },
+      output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.findWood(args.name, args.maxAbove, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_find_beds',
+      description: 'Find up to four confirmed nearby Overworld beds in loaded chunks, within 32 blocks. A listed bed may still be occupied or unsafe.',
+      parameters: {}, output,
+      async execute(_args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.findBeds(exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_sleep',
+      description: 'Use one nearby visible Overworld bed through normal survival interaction. Returns whether you actually started sleeping.',
+      parameters: {
+        x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, z: { type: 'integer', required: true },
+      }, output,
+      async execute(target, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.sleepInBed(target, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_place_bed',
+      description: 'Place one bed from your inventory on a nearby pair of empty, dry natural dirt or grass cells. Target the foot coordinate. Returns the verified bed-head coordinate for mc_sleep.',
+      parameters: {
+        x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, z: { type: 'integer', required: true },
+      }, output,
+      async execute(target, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.placeBed(target, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_night_cover',
+      description: 'Find nearby suitable feet positions (sites), check current shelter (status), dig and cap a three-block temporary shelter at your feet (enter), or leave after daylight using its recovered dirt (leave). Only dry natural dirt with a usable surface exit qualifies.',
+      parameters: { phase: { type: 'string', enum: ['sites', 'status', 'enter', 'leave'], required: true } }, output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.nightCover(args.phase, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_surface',
+      description: 'Swim upward for up to eight seconds when air is depleted. Returns measured air and position. Uses normal survival movement.',
+      parameters: {}, output,
+      async execute(_args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.surface(exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_respawn',
+      description: 'Return this offline character to the server in normal survival after a verified death. Only one attempt per new death receipt.',
+      parameters: {}, output,
+      async execute(_args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.modelRespawn(exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_clear_grass',
+      description: 'Break one verified short-grass plant at the floor height of a site already authorized for a saved house. Reports the actual result.',
+      parameters: {
+        zoneId: { type: 'string', required: true },
+        x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, z: { type: 'integer', required: true },
+      }, output,
+      async execute({ zoneId, ...target }, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.clearGrass(zoneId, target, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_build_house',
+      description: 'Preview and build one saved house whose specific site has been authorized by the owner. Returns the live preview failure and exact inventory shortage, or the verified build receipt.',
+      parameters: { id: { type: 'string', required: true, description: 'Saved plan ID from mc_status houses.' } },
+      output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.modelBuildHouse(args.id, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
       name: 'mc_follow',
       description: 'Follow the real online owner using server-side CBI pathfinding. Follow continues until mc_stop; it does not teleport or grant OP.',
       parameters: {}, output,
       async execute(_args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.follow()) },
     })),
     ctx.tools.register(defineTool({
-      name: 'mc_move',
-      description: 'Move to nearby coordinates using CBI. Limited to 32 horizontal blocks and 8 vertical blocks; placement and general breaking are disabled.',
+      name: 'mc_teleport',
+      description: 'Teleport Dafeiyu to exact coordinates only when the owner explicitly asks to relocate her (for example to the owner\'s last logout position). Overworld only; the worker confirms the arrival by reading her position back.',
       parameters: {
         x: { type: 'number', description: 'Integer X coordinate.', required: true },
         y: { type: 'number', description: 'Integer Y coordinate.', required: true },
         z: { type: 'number', description: 'Integer Z coordinate.', required: true },
       }, output,
-      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.move(args, exec.signal)) },
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.teleport(args, exec.signal)) },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_gamemode',
+      description: 'Switch Dafeiyu between survival and creative. Creative is only admitted while a house draft is bound to an authorized build zone or a house build is running, because the owner authorized creative for building; the host returns her to survival when the build settles.',
+      parameters: { mode: { type: 'string', description: 'creative or survival.', required: true } },
+      output,
+      async execute(args, exec) {
+        authority(exec)
+        const mode = args.mode === 'creative' ? 'creative' : args.mode === 'survival' ? 'survival' : undefined
+        if (!mode) throw new Error('mc_gamemode requires creative or survival')
+        if (mode === 'creative' && !runtime.minecraft.creativeBuildAllowed()) throw new Error('creative requires an authorized house build')
+        if (mode === 'creative') runtime.minecraft.markCreativeForBuild()
+        return JSON.stringify(await runtime.minecraft.setGameMode(mode, exec.signal))
+      },
+    })),
+    ctx.tools.register(defineTool({
+      name: 'mc_move',
+      description: 'Move to nearby coordinates using CBI. Limited to 32 horizontal blocks and 8 vertical blocks. Falling air, major route divergence or failed arrival returns the current observations.',
+      parameters: {
+        x: { type: 'number', description: 'Integer X coordinate.', required: true },
+        y: { type: 'number', description: 'Integer Y coordinate.', required: true },
+        z: { type: 'number', description: 'Integer Z coordinate.', required: true },
+      }, output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.modelMove(args, exec.signal)) },
     })),
     ctx.tools.register(defineTool({
       name: 'mc_dig',
-      description: 'Collect one verified natural log with nearby leaves using precise CBI break and pickup. No player buildings or arbitrary breaking. The block becoming air and the inventory are read back.',
-      parameters: { name: { type: 'string', enum: LOGS, description: 'Natural log species, default oak_log.' } }, output,
-      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.dig(args.name, exec.signal)) },
+      description: 'Collect one verified natural log with nearby leaves. Optionally choose one exact block from mc_find_wood. The block becoming air and the inventory are read back.',
+      parameters: {
+        name: { type: 'string', enum: LOGS, description: 'Natural log species, default oak_log.' },
+        target: { type: 'object', additionalProperties: false, properties: {
+          x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, z: { type: 'integer', required: true },
+        } },
+      }, output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.modelDig(args.name, args.target, exec.signal)) },
     })),
     ctx.tools.register(defineTool({
       name: 'mc_return',
@@ -125,9 +230,12 @@ export function registerMinecraftTools(ctx: Context, runtime: CompanionRuntime):
     })),
     ctx.tools.register(defineTool({
       name: 'mc_craft',
-      description: 'Craft one exact allowlisted survival recipe using real Minecraft recipes and a rollback-safe inventory transaction. Wooden/stone pickaxes and shields require an existing reachable crafting table. Output inventory delta is independently verified.',
-      parameters: { name: { type: 'string', enum: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks', 'stick', 'crafting_table', 'wooden_pickaxe', 'stone_pickaxe', 'shield'], description: 'One recipe to craft once.', required: true } }, output,
-      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.craft(args.name, exec.signal)) },
+      description: 'Craft an allowlisted survival recipe with verified inventory changes. Planks support up to six batches per call. Wooden/stone pickaxes and shields require a reachable crafting table.',
+      parameters: {
+        name: { type: 'string', enum: ['oak_planks', 'spruce_planks', 'birch_planks', 'jungle_planks', 'acacia_planks', 'dark_oak_planks', 'mangrove_planks', 'cherry_planks', 'stick', 'crafting_table', 'wooden_pickaxe', 'stone_pickaxe', 'shield', 'white_bed'], required: true },
+        batches: { type: 'integer', description: 'Number of recipe batches, 1–6 for planks or 1 for other recipes. Defaults to 1.' },
+      }, output,
+      async execute(args, exec) { authority(exec); return JSON.stringify(await runtime.minecraft.modelCraft(args.name, args.batches ?? 1, exec.signal)) },
     })),
     ctx.tools.register(defineTool({
       name: 'mc_shield',

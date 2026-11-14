@@ -78,6 +78,7 @@ export interface MinecraftTransportOptions {
   gamePort?: number
   consoleFifo?: string
   offline?: boolean
+  voiceDir?: string
 }
 
 interface MinecraftOptions extends MinecraftTransportOptions {
@@ -130,6 +131,10 @@ function inventoryCount(observation: Record<string, unknown>, name: string): num
 }
 
 function gameActionFact(kind: string, result: any): string {
+  if (kind === 'sleep') return '使用了床，服务端确认实际入睡'
+  if (kind === 'place-bed') return '用背包中的床完成了放置，服务端确认床头坐标'
+  if (kind === 'night-cover') return result?.status === 'covered' ? '挖三填一进入了临时掩体，服务端确认泥土封顶'
+    : '在天亮后打开临时掩体，用回收的垫脚材料回到地表'
   if (kind === 'storage') return `在授权区${result?.operation === 'deposit' ? '存入' : '取出'} ${result?.count} 个 ${result?.itemName}，背包与箱内数量已双向核对`
   if (kind === 'smelt' && result?.phase === 'start') return `在授权区向熔炉投入 ${result?.count} 个 ${result?.itemName}，已核对扣料，等待后续取出成品`
   if (kind === 'smelt') return `在授权区从同一熔炉取出 ${result?.count} 个 ${result?.output}，已核对实际背包增量`
@@ -157,6 +162,7 @@ export class MinecraftService {
   private refreshing?: Promise<void>
   private timer?: ReturnType<typeof setInterval>
   private lastError?: string
+  private lastRespawnDeath?: number
   private recentEvents: Record<string, unknown>[] = []
   private followTaskId?: string
   private currentBuildZoneId?: string
@@ -166,6 +172,7 @@ export class MinecraftService {
   private readonly dailyHouseProjectOffers = new WeakMap<DailyHouseProjectOffer, DailyHouseProjectOfferSource>()
   private houseProjectPlanGeneration = 0
   private houseRun?: HouseRun
+  private creativeForBuild = false
   private recoveredHouses = false
   private learningDirty = true
   private syncingLessons?: Promise<void>
@@ -196,6 +203,7 @@ export class MinecraftService {
     private readonly onSupplyStop?: (zoneId?: string, explicit?: boolean) => void,
     private readonly onCampPause?: () => void,
     private readonly canReceiveChat?: () => boolean,
+    private readonly onPrivateReply?: (taskId: string, text: string, stillAllowed: () => boolean) => void,
   ) {
     this.workerRoot = join(homedir(), '.local', 'share', 'companion', 'minecraft-worker')
     this.workerPath = join(dirname(createRequire(import.meta.url).resolve('dsh-companion-bot/package.json')), 'lib', 'minecraft-worker.js')
@@ -235,6 +243,11 @@ export class MinecraftService {
     this.reconcileHouseRuns()
     for (const task of this.store.runningTasksByCapability('minecraft.shield')) {
       this.store.transitionTask(task.id, 'cancelled', 'shield-result-unconfirmed-after-restart')
+    }
+    for (const kind of ['sleep', 'place-bed', 'night-cover']) {
+      for (const task of this.store.runningTasksByCapability(`minecraft.${kind}`)) {
+        this.store.transitionTask(task.id, 'cancelled', 'night-action-unconfirmed-after-restart')
+      }
     }
     mkdirSync(this.dataDir, { recursive: true, mode: 0o700 })
     const tokenPath = join(this.dataDir, 'worker.token')
@@ -319,7 +332,7 @@ export class MinecraftService {
     const building = path === '/build' || path === '/build-authorized' || path === '/camp/visit/build'
     const timeout = AbortSignal.timeout(path === '/dig' || path === '/camp/visit/gather' ? 100_000
       : path === '/house/build' || path === '/house/recover' ? 450_000
-        : path === '/return' ? 120_000 : path === '/shield' ? 18_000 : building ? 90_000 : 60_000)
+        : path === '/return' || path === '/night-cover' ? 120_000 : path === '/shield' ? 18_000 : building ? 90_000 : 60_000)
     const response = await fetch(`${this.workerApi}${path}`, {
       method,
       headers: { authorization: `Bearer ${this.token}`, ...(input === undefined ? {} : { 'content-type': 'application/json' }),
@@ -600,7 +613,7 @@ export class MinecraftService {
       const chatRelay = this.canReceiveChat?.() === true && !this.campControl().pausedAt
       const value = await this.request(`/events?after=${this.cursor}${chatRelay ? '&chatRelay=1' : ''}`)
       if (!isCurrent()) return
-      for (const event of value.items as { seq: number; kind: string; username?: string; message?: string; delivery?: string; action?: string; error?: string; target?: GameLessonTarget }[]) {
+      for (const event of value.items as { seq: number; kind: string; username?: string; message?: string; delivery?: string; action?: string; error?: string; target?: GameLessonTarget; position?: unknown; oxygen?: unknown }[]) {
         this.cursor = Math.max(this.cursor, event.seq)
         const privateChat = event.delivery === 'private'
         this.recentEvents.push(privateChat ? { ...event, message: undefined } : event)
@@ -625,7 +638,11 @@ export class MinecraftService {
         }
         if (event.kind === 'world.alert') this.store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft', kind: 'world.alert', summary: String(event.message ?? '').slice(0, 240), status: 'warning', data: { seq: event.seq } })
         if (event.kind === 'player.death') {
-          this.store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft', kind: 'player.death', summary: String(event.message ?? '').slice(0, 240), status: 'warning', data: { seq: event.seq } })
+          const position = this.targetOf(event.position && typeof event.position === 'object'
+            ? Object.fromEntries(Object.entries(event.position).map(([key, value]) => [key, Math.floor(Number(value))])) : undefined)
+          const oxygen = typeof event.oxygen === 'number' && Number.isFinite(event.oxygen) ? event.oxygen : undefined
+          this.store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft', kind: 'player.death', summary: String(event.message ?? '').slice(0, 240), status: 'warning',
+            data: { seq: event.seq, ...(position && { position: { ...position } }), ...(oxygen !== undefined && { oxygen }) } })
           const binding = this.store.bindingByContext('game.minecraft')
           if (binding) this.store.memory.create({
             kind: 'event', scope: 'shared', contextId: 'game.minecraft', status: 'active', confidence: 1, importance: 0.7,
@@ -669,9 +686,9 @@ export class MinecraftService {
     return this.view()
   }
 
-  async connect(): Promise<unknown> {
+  async connect(atOwner = false): Promise<unknown> {
     this.clearCampVisitReady()
-    const value = await this.campRequest('/connect', {}, this.campEpoch)
+    const value = await this.campRequest('/connect', atOwner ? { atOwner: true } : {}, this.campEpoch)
     this.clearCampVisitReady()
     await this.ensureGameSession()
     return value
@@ -807,7 +824,7 @@ export class MinecraftService {
     if (receipt.direction === input.direction) throw new DeviceAuthError(409, 'minecraft-camp-visit-patrol-direction-used')
   }
 
-  private async action(kind: 'chat' | 'follow' | 'move' | 'dig' | 'return' | 'craft' | 'shield' | 'build' | 'survey' | 'stop' | 'storage' | 'smelt', input: unknown, keepRunning = false, signal?: AbortSignal, parentTaskId?: string, authorized?: AuthorizedAction): Promise<{ task: TaskRecord; result: unknown }> {
+  private async action(kind: 'chat' | 'follow' | 'move' | 'dig' | 'return' | 'craft' | 'shield' | 'build' | 'survey' | 'stop' | 'storage' | 'smelt' | 'sleep' | 'place-bed' | 'night-cover', input: unknown, keepRunning = false, signal?: AbortSignal, parentTaskId?: string, authorized?: AuthorizedAction): Promise<{ task: TaskRecord; result: unknown }> {
     const epoch = this.campEpoch
     if (kind !== 'stop') this.assertCampOpen(epoch)
     const binding = this.store.bindingByContext('game.minecraft')
@@ -838,6 +855,12 @@ export class MinecraftService {
       let result = kind === 'stop' ? await this.request(authorized?.path ?? '/stop', 'POST', input, signal)
         : await this.campRequest(authorized?.path ?? `/${kind}`, authorized?.input ?? input, epoch, signal, visitId)
       if (kind === 'chat' && !ChatDelivery.safeParse(result).success) throw new DeviceAuthError(502, 'minecraft-chat-receipt-unconfirmed')
+      if (kind === 'sleep' && result?.sleeping !== true) throw new DeviceAuthError(409, 'night-bed-use-refused')
+      if (kind === 'place-bed' && (result?.placed !== true || !this.targetOf(result.head))) throw new DeviceAuthError(409, 'night-bed-placement-refused')
+      if (kind === 'night-cover' && (!this.targetOf(result?.surface) ||
+          (result?.status !== 'covered' && (result?.status !== 'opened' || result.exit?.returned !== true)))) {
+        throw new DeviceAuthError(502, 'night-shelter-receipt-unconfirmed')
+      }
       if (kind === 'shield') {
         signal?.throwIfAborted()
         if (this.store.taskById(task.id)?.status !== 'running') throw new DeviceAuthError(409, 'shield-cancelled')
@@ -1011,7 +1034,12 @@ export class MinecraftService {
 
   async modelChat(text: string, signal: AbortSignal): Promise<unknown> {
     const { task, result } = await this.action('chat', { text, receiptOnly: true }, false, signal)
-    return { taskId: task.id, status: task.status, ...ChatDelivery.parse(result) }
+    const delivery = ChatDelivery.parse(result)
+    if (task.status === 'succeeded' && delivery.delivery === 'private') {
+      const epoch = this.campEpoch
+      this.onPrivateReply?.(task.id, text, () => !this.closing && this.campEpoch === epoch && !this.campControl().pausedAt)
+    }
+    return { taskId: task.id, status: task.status, ...delivery }
   }
 
   async follow(): Promise<unknown> {
@@ -1024,8 +1052,100 @@ export class MinecraftService {
     return this.action('move', input, false, signal)
   }
 
-  dig(name: string | undefined, signal?: AbortSignal, parentTaskId?: string): Promise<unknown> {
-    return this.action('dig', { name }, false, signal, parentTaskId)
+  async modelMove(input: { x: number; y: number; z: number }, signal: AbortSignal): Promise<unknown> {
+    try {
+      return await this.move(input, signal)
+    } catch (error) {
+      if (!(error instanceof DeviceAuthError) || !['move-air-falling', 'move-route-diverged', 'move-ended-without-arrival', 'move-timeout', 'unsafe-target'].includes(error.code)) throw error
+      const observation = await this.observe().catch(() => undefined)
+      signal.throwIfAborted()
+      return { moved: false, reason: error.code, target: input, observation }
+    }
+  }
+
+  async modelRespawn(signal: AbortSignal): Promise<unknown> {
+    this.assertCampOpen()
+    const worker = await this.request('', 'GET', undefined, signal)
+    signal.throwIfAborted()
+    if (worker.online === true) return { respawned: false, reason: 'already-online' }
+    const death = this.store.activities(150).find(event => event.contextId === 'game.minecraft' && event.kind === 'player.death')
+    if (!death || death.id === this.lastRespawnDeath || Date.now() - Date.parse(death.occurredAt) > 30 * 60_000) {
+      return { respawned: false, reason: 'no-new-death-receipt' }
+    }
+    this.lastRespawnDeath = death.id
+    const result = await this.connect()
+    return { respawned: true, result }
+  }
+
+  inspectTerrain(targets: { x: number; y: number; z: number }[], signal: AbortSignal): Promise<unknown> {
+    return this.campRequest('/terrain', targets, this.campEpoch, signal)
+  }
+
+  findWood(name: string, maxAbove: number | undefined, signal: AbortSignal): Promise<unknown> {
+    return this.campRequest('/wood', { name, maxAbove }, this.campEpoch, signal)
+  }
+
+  async clearGrass(zoneId: string, target: { x: number; y: number; z: number }, signal: AbortSignal): Promise<unknown> {
+    const epoch = this.campEpoch
+    const zone = await this.authorizedZone(zoneId, signal, 'houseBuilding')
+    if (!zone || !this.store.minecraftHouses.list().some(draft => {
+      if (draft.zoneId !== zoneId || draft.status !== 'draft') return false
+      const minX = zone.x - Math.floor(draft.layout.width / 2)
+      const minZ = zone.z - Math.floor(draft.layout.depth / 2)
+      return target.y === zone.y && target.x >= minX && target.x < minX + draft.layout.width &&
+        target.z >= minZ && target.z < minZ + draft.layout.depth
+    })) {
+      throw new DeviceAuthError(409, 'minecraft-house-site-not-authorized')
+    }
+    const { id, dimension, x, y, z, radius } = zone
+    return this.campRequest('/clear-grass', { zone: { id, dimension, x, y, z, radius }, target }, epoch, signal)
+  }
+
+  surface(signal: AbortSignal): Promise<unknown> {
+    return this.campRequest('/surface', {}, this.campEpoch, signal)
+  }
+
+  findBeds(signal: AbortSignal): Promise<unknown> {
+    return this.campRequest('/find-beds', {}, this.campEpoch, signal)
+  }
+
+  sleepInBed(target: { x: number; y: number; z: number }, signal: AbortSignal): Promise<unknown> {
+    return this.modelNightAction('sleep', target, signal)
+  }
+
+  placeBed(target: { x: number; y: number; z: number }, signal: AbortSignal): Promise<unknown> {
+    return this.modelNightAction('place-bed', target, signal)
+  }
+
+  nightCover(phase: 'sites' | 'status' | 'enter' | 'leave', signal: AbortSignal): Promise<unknown> {
+    return phase === 'sites' || phase === 'status' ? this.campRequest('/night-cover', { phase }, this.campEpoch, signal)
+      : this.modelNightAction('night-cover', { phase }, signal)
+  }
+
+  private async modelNightAction(kind: 'sleep' | 'place-bed' | 'night-cover', input: unknown, signal: AbortSignal): Promise<unknown> {
+    try {
+      const { task, result } = await this.action(kind, input, false, signal)
+      return { taskId: task.id, ...(result as Record<string, unknown>) }
+    } catch (error) {
+      signal.throwIfAborted()
+      if (!(error instanceof DeviceAuthError) || !/^night-[a-z-]+$/u.test(error.code)) throw error
+      return { status: 'refused', reason: error.code }
+    }
+  }
+
+  dig(name: string | undefined, signal?: AbortSignal, parentTaskId?: string, target?: { x: number; y: number; z: number }): Promise<unknown> {
+    return this.action('dig', { name, target }, false, signal, parentTaskId)
+  }
+
+  async modelDig(name: string | undefined, target: { x: number; y: number; z: number } | undefined, signal: AbortSignal): Promise<unknown> {
+    try {
+      return await this.dig(name, signal, undefined, target)
+    } catch (error) {
+      if (!(error instanceof DeviceAuthError) || !['dig-air-falling', 'dig-health-low', 'dig-health-falling', 'dig-target-unreachable'].includes(error.code)) throw error
+      const observation = await this.observe().catch(() => undefined)
+      signal.throwIfAborted()
+      return { gathered: false, reason: error.code, target, observation }
+    }
   }
 
   returnToSafety(signal?: AbortSignal): Promise<unknown> {
@@ -1034,6 +1154,30 @@ export class MinecraftService {
 
   craft(name: string, signal?: AbortSignal, parentTaskId?: string): Promise<unknown> {
     return this.action('craft', { name }, false, signal, parentTaskId)
+  }
+
+  async modelCraft(name: string, batches: number, signal: AbortSignal): Promise<unknown> {
+    if (!Number.isSafeInteger(batches) || batches < 1 || batches > 6) throw new DeviceAuthError(400, 'craft-batches-invalid')
+    if (batches === 1) return this.craft(name, signal)
+    if (!name.endsWith('_planks')) throw new DeviceAuthError(400, 'craft-batches-planks-only')
+    const tasks: string[] = []
+    let produced = 0
+    let reason: string | undefined
+    for (let index = 0; index < batches; index++) {
+      signal.throwIfAborted()
+      try {
+        const { task, result } = await this.action('craft', { name }, false, signal)
+        const receipt = z.object({ crafted: z.literal(true), name: z.literal(name), count: z.literal(4) }).parse(result)
+        tasks.push(task.id)
+        produced += receipt.count
+      } catch (error) {
+        signal.throwIfAborted()
+        if (!tasks.length || !(error instanceof DeviceAuthError)) throw error
+        reason = error.code
+        break
+      }
+    }
+    return { name, requested: batches, completed: tasks.length, produced, tasks, ...(reason && { reason }) }
   }
 
   holdShield(input: unknown, signal?: AbortSignal): Promise<{ task: TaskRecord; result: unknown }> {
@@ -1566,6 +1710,10 @@ export class MinecraftService {
       return { outcome: 'completed', verification, placed: receipt.placed }
     } finally {
       this.houseRun = undefined
+      if (this.creativeForBuild) {
+        this.creativeForBuild = false
+        await this.setGameMode('survival').catch(() => {})
+      }
       resolve()
     }
   }
@@ -1703,9 +1851,10 @@ export class MinecraftService {
     return { input, revision: draft.revision ?? 0 }
   }
 
-  async previewHouse(id: string, zoneId: string, signal: AbortSignal): Promise<MinecraftHouseSitePreview> {
+  async previewHouse(id: string, zoneId: string, signal: AbortSignal, expectedRevision?: number): Promise<MinecraftHouseSitePreview> {
     const epoch = this.campEpoch
     const { input, revision } = await this.houseInput(id, zoneId, signal)
+    if (expectedRevision !== undefined && expectedRevision !== revision) throw new DeviceAuthError(409, 'minecraft-house-revision-stale')
     const checkRevision = () => {
       if ((this.editableHouse(id, zoneId).revision ?? 0) !== revision) throw new DeviceAuthError(409, 'minecraft-house-revision-stale')
     }
@@ -1730,7 +1879,43 @@ export class MinecraftService {
     return { ...preview, previewId }
   }
 
-  async buildHouse(id: string, zoneId: string, previewId: string): Promise<MinecraftHouseDraft> {
+  authorizeHouseSite(id: string, zoneId: string): MinecraftHouseDraft {
+    this.assertCampOpen()
+    if (!this.store.buildZoneById(zoneId) || !this.store.minecraftHouses.bindDraftZone(id, zoneId)) {
+      throw new DeviceAuthError(409, 'minecraft-house-site-not-authorized')
+    }
+    return this.store.minecraftHouses.get(id)!
+  }
+
+  async modelBuildHouse(id: string, signal: AbortSignal): Promise<unknown> {
+    const draft = this.store.minecraftHouses.get(id)
+    if (!draft?.zoneId || !this.store.buildZoneById(draft.zoneId)) throw new DeviceAuthError(409, 'minecraft-house-site-not-authorized')
+    if (draft.status === 'built') return { built: true, house: draft }
+    const preview = await this.previewHouse(id, draft.zoneId, signal)
+    if (!preview.ready || !preview.previewId) return { built: false, ...preview }
+    return { built: true, house: await this.buildHouse(id, draft.zoneId, preview.previewId, signal) }
+  }
+
+  async teleport(input: { x: number; y: number; z: number }, signal?: AbortSignal): Promise<unknown> {
+    const result = await this.request('/api/teleport', 'POST', input, signal)
+    this.store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft', kind: 'world.teleport',
+      summary: '按主人要求传送到大肥鱼指定坐标', status: 'success', data: { target: input } })
+    return result
+  }
+
+  async setGameMode(mode: 'creative' | 'survival', signal?: AbortSignal): Promise<unknown> {
+    return this.request('/api/gamemode', 'POST', { mode }, signal)
+  }
+
+  markCreativeForBuild(): void {
+    this.creativeForBuild = true
+  }
+
+  creativeBuildAllowed(): boolean {
+    return !!this.houseRun || this.store.minecraftHouses.list().some(draft => draft.zoneId !== null && draft.status !== 'built')
+  }
+
+  async buildHouse(id: string, zoneId: string, previewId: string, callerSignal?: AbortSignal, assertAuthorized?: () => void): Promise<MinecraftHouseDraft> {
     const existing = this.store.minecraftHouses.get(id)
     if (existing?.status === 'built' && existing.zoneId === zoneId) return existing
     const epoch = this.campEpoch
@@ -1740,12 +1925,13 @@ export class MinecraftService {
     if (!validApproval()) throw new DeviceAuthError(409, 'minecraft-house-preview-required')
     const { promise: settled, resolve } = Promise.withResolvers<void>()
     const run = { zoneId, controller: new AbortController(), settled }
-    const signal = run.controller.signal
+    const signal = callerSignal ? AbortSignal.any([callerSignal, run.controller.signal]) : run.controller.signal
     const { input, revision } = await this.houseInput(id, zoneId, signal)
     this.assertCampOpen(epoch)
     if (!validApproval() || approval?.revision !== revision || this.worldBusy() || this.visitActionPermit) {
       throw new DeviceAuthError(409, 'minecraft-house-preview-required')
     }
+    assertAuthorized?.()
     const binding = this.store.bindingByContext('game.minecraft')
     const task = this.store.transaction(() => {
       const accepted = this.store.createTask({ capabilityId: MINECRAFT_HOUSE_CAPABILITY, contextId: 'game.minecraft',
@@ -2441,10 +2627,12 @@ export class MinecraftService {
     return result
   }
 
-  async modelStatus(section: 'overview' | 'build_zones' | 'wardrobe' | 'lessons' | 'places', offset: number, signal: AbortSignal): Promise<unknown> {
+  async modelStatus(section: 'overview' | 'build_zones' | 'wardrobe' | 'lessons' | 'places' | 'houses', offset: number, signal: AbortSignal): Promise<unknown> {
     signal.throwIfAborted()
     if (section === 'places') return this.placeStatus()
     if (section === 'wardrobe') return { wardrobe: await this.wardrobe(signal) }
+    if (section === 'houses') return { houses: this.store.minecraftHouses.list().filter(draft => draft.zoneId && this.store.buildZoneById(draft.zoneId))
+      .slice(0, 8).map(({ id, name, zoneId, layout, status }) => ({ id, name, zoneId, layout, status, materials: minecraftHouseMaterials(layout) })) }
     if (section === 'lessons') return { lessons: this.store.gameLearning.forPrompt(undefined, 3) }
     if (section === 'build_zones') {
       if (!Number.isSafeInteger(offset) || offset < 0) throw new DeviceAuthError(400, 'minecraft-zone-offset-invalid')
@@ -2457,6 +2645,7 @@ export class MinecraftService {
     const action = typeof worker?.action === 'string' && /^[a-z][a-z-]{0,31}$/u.test(worker.action) ? worker.action : undefined
     return { workerOnline: !!worker, online: worker?.online === true, connecting: worker?.connecting === true,
       campPaused: !!this.campControl().pausedAt, ...(worker?.capabilities?.shield === true && { shieldAvailable: true }),
+      ...(worker?.capabilities?.nightShelter === true && { nightShelterAvailable: true }),
       ...(worker?.capabilities?.ovoStorage === true && { ovoStorage: true }), ...(worker?.capabilities?.ovoSmelting === true && { ovoSmelting: true }), ...(action && { action }) }
   }
 
@@ -2464,7 +2653,13 @@ export class MinecraftService {
     this.assertCampOpen()
     const messages = minecraftOwnerEvents(job.payload.events).map(event => event.message)
     if (!messages.length) throw new DeviceAuthError(400, 'minecraft-event-messages-invalid')
-    return MINECRAFT_OWNER_MESSAGES + JSON.stringify(messages)
+    const deaths = this.store.activities(150).filter(event => event.contextId === 'game.minecraft' && event.kind === 'player.death').slice(0, 2)
+      .map(event => ({ at: event.occurredAt, outcome: event.summary, ...event.data }))
+    const actions = this.store.gameLearning.list({ limit: 4 }).map(({ action, errorCode, target, status, occurrences }) => ({ action, errorCode, target, status, occurrences }))
+    const observations = this.store.selfNotes.recallCandidates('game.minecraft').filter(note => note.createdBy === 'companion' &&
+      note.sourceRefs.length > 0 && note.sourceRefs.every(ref => ref.contextId === 'game.minecraft')).slice(0, 2).map(note => note.content.slice(0, 180))
+    return ((deaths.length || actions.length || observations.length)
+      ? `Minecraft 服务端回执：${JSON.stringify({ deaths, actions, selfNotes: observations })}\n` : '') + MINECRAFT_OWNER_MESSAGES + JSON.stringify(messages)
   }
 
   finishEvent(job: AutonomousJob): { acted: boolean; reason: string; remaining?: MinecraftOwnerEvent[] } {

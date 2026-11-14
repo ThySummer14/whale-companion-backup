@@ -2150,3 +2150,10 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 新增 `DeepSeekOcrProvider`（`POST /v1/tools/ocr`，multipart file+purpose，逐页 text；200 响应仍可能带 error 对象需检查；前导换行属 JSON 空白）；宿主侧 20MiB 上限（官方 100MiB，保护 mini 内存）、180s 超时；密钥同 `DEEPSEEK_API_KEY`。
 - Agent 工具 `companion_ocr(mediaId, purpose?)`：读媒体库真实资产逐页识别，私有评估场景禁用；设备路由 `POST ocr` 支持 raw image/pdf body 与 JSON mediaId 两分支。
 - 4 项 provider 测试（multipart/前导换行、in-body error、状态映射、尺寸/页数校验）+ 设备回归全绿；正式机用真实舞台截图验收：中文与界面文字逐字识别（含「空城计（大肥鱼翻唱）」），验收临时设备已撤销。
+
+## 160. Companion 0.128.0 受控传送与建造期创造（实测待专服启动）
+
+- 新增 worker `/api/teleport`（overworld only、tp 后位置读回 ±0.5 确认）与 `/api/gamemode`（playerGameType 读回确认）；宿主 `mc_teleport` / `mc_gamemode` 工具与主人级管理路由 `minecraft/connect|teleport|gamemode`。创造仅在有已授权地块的草案或建造进行中时放行（`creativeBuildAllowed`），建造结算后自动回生存。
+- 房屋草案 schema 扩展（樱花材料/12 边/400 块）本轮尝试后回滚：22 项分区/恢复契约测试钉死旧上限，需独立任务统一改写；当前仍为 5×5×5/100 块/4 材料，**容纳不下视频里 7×9 两层樱花茶肆**，列为后续任务。
+- 实测状态：代码已部署、门控 403 正确；但专服进程当前未运行（connect console 读回超时），且旧 worker 进程占用端口导致新路由 404。需启动专服并重拉 worker 后复测传送/创造/建造。
+- 蓝图视频理解已验通：qwen3.8-omni 对 BV1bbGgz4EZk 逐 12 秒窗口输出结构描述（7x9 樱花地基→粉柱→二层浅黄平台→深褐屋顶+灯笼）；clip 预算为每分钟限流，间隔 65s 可续采。

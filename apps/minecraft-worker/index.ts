@@ -10,6 +10,7 @@ import { msaJobOf, msaJobStart, msaSession } from './msa.mjs'
 import { CbiWorld } from './cbi-world.ts'
 import { MinecraftWardrobeId } from '../../src/protocol/minecraft-wardrobe.ts'
 import { MinecraftShieldRequest } from '../../src/protocol/minecraft-shield.ts'
+import { MinecraftAuthorizedZone } from '../../src/core/minecraft-supply.ts'
 import type { Bot } from 'mineflayer'
 import { createOvoBot, OvoSkillRunner } from './ovo-skills.ts'
 import { offlineMinecraftProfile } from './offline.ts'
@@ -542,7 +543,11 @@ const server = createServer((req, res) => {
         let result: unknown
         switch (path) {
           case '/api/login': result = world.login(); break
-          case '/api/connect': result = await world.connect(); break
+          case '/api/connect': {
+            const { atOwner } = z.object({ atOwner: z.boolean().optional() }).parse(input)
+            result = await (world instanceof CbiWorld ? world.connect(atOwner) : world.connect())
+            break
+          }
           case '/api/disconnect': result = await world.disconnect(); break
           case '/api/chat': {
             const chat = z.object({ text: z.string(), receiptOnly: z.boolean().optional() }).parse(input)
@@ -586,7 +591,55 @@ const server = createServer((req, res) => {
           }
           case '/api/follow': result = await world.follow(); break
           case '/api/move': result = await world.move(z.object({ x: z.number(), y: z.number(), z: z.number() }).parse(input)); break
-          case '/api/dig': result = await world.dig(z.object({ name: z.string().optional() }).parse(input).name); break
+          case '/api/teleport':
+          case '/api/gamemode': {
+            if (!(world instanceof CbiWorld)) throw new Error('survival-tool-requires-cbi')
+            if (path === '/api/teleport') result = await world.teleport(z.object({ x: z.number(), y: z.number(), z: z.number() }).parse(input))
+            else result = await world.setGameMode(z.object({ mode: z.enum(['creative', 'survival']) }).parse(input).mode)
+            break
+          }
+          case '/api/terrain':
+          case '/api/wood':
+          case '/api/clear-grass':
+          case '/api/find-beds':
+          case '/api/sleep':
+          case '/api/place-bed':
+          case '/api/night-cover':
+          case '/api/surface': {
+            if (!(world instanceof CbiWorld)) throw new Error('survival-tool-requires-cbi')
+            const controller = new AbortController()
+            const disconnect = () => controller.abort()
+            res.once('close', disconnect)
+            if (res.destroyed) disconnect()
+            try {
+              const position = z.strictObject({ x: z.int(), y: z.int(), z: z.int() })
+              if (path === '/api/terrain') result = await world.inspectTerrain(z.array(position).min(1).max(8).parse(input), controller.signal)
+              else if (path === '/api/wood') {
+                const query = z.strictObject({ name: z.string(), maxAbove: z.int().min(0).max(12).optional() }).parse(typeof input === 'string' ? { name: input } : input)
+                result = await world.findWood(query.name, controller.signal, query.maxAbove)
+              }
+              else if (path === '/api/clear-grass') {
+                const request = z.strictObject({ zone: MinecraftAuthorizedZone, target: position }).parse(input)
+                result = await world.clearGrass(request.zone, request.target, controller.signal)
+              } else if (path === '/api/find-beds') {
+                z.strictObject({}).parse(input)
+                result = await world.findBeds(controller.signal)
+              } else if (path === '/api/sleep' || path === '/api/place-bed') {
+                result = await world.useNightBed(position.parse(input), path === '/api/place-bed', controller.signal)
+              } else if (path === '/api/night-cover') {
+                const { phase } = z.strictObject({ phase: z.enum(['sites', 'status', 'enter', 'leave']) }).parse(input)
+                result = await world.nightCover(phase, controller.signal)
+              } else result = await world.surface(controller.signal)
+            } finally { res.off('close', disconnect) }
+            break
+          }
+          case '/api/dig': {
+            const request = z.object({ name: z.string().optional(),
+              target: z.strictObject({ x: z.int(), y: z.int(), z: z.int() }).optional() }).parse(input)
+            if (request.target && !(world instanceof CbiWorld)) throw new Error('dig-target-requires-cbi')
+            result = await (world instanceof CbiWorld ? world.dig(request.name, request.target) : world.dig(request.name))
+            break
+          }
           case '/api/return':
             if (!(world instanceof CbiWorld)) throw new Error('safe-return-requires-cbi')
             result = await world.returnToSafety(); break
@@ -684,7 +737,7 @@ const server = createServer((req, res) => {
       if (!res.destroyed) json(res, ['minecraft-wardrobe-invalid-request', 'minecraft-camp-visit-invalid-request', 'minecraft-house-invalid-request', 'shield-invalid-request'].includes(message) ? 400
         : message === 'minecraft-wardrobe-unconfirmed' || message === 'shield-unconfirmed' || /^house-[a-z-]+-unconfirmed$/u.test(message) || /^minecraft-(?:storage|smelt)-[a-z-]+-unconfirmed$/u.test(message) ? 502
         : message === 'house-timeout' || message === 'shield-timeout' ? 504
-        : message.startsWith('shield-') ? 409
+        : message.startsWith('shield-') || /^night-[a-z-]+$/u.test(message) ? 409
         : message.startsWith('minecraft-camp-visit-') || /^homebuild-[a-z0-9-]+$/u.test(message) ? 409
         : message === 'minecraft-camp-paused' || message.includes('cancelled') || message.includes('busy') || message.includes('offline') || message.includes('required') || message.includes('refused') || message.includes('not-visible') || message.includes('not-found') || message.endsWith('-unavailable') || message.endsWith('-preconditions-changed') ? 409 : 500, { error: message })
     }

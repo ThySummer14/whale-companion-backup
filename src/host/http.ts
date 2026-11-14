@@ -667,6 +667,22 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
           json(res, 200, await runtime.minecraft.view())
           return
         }
+        if (method === 'POST' && path === 'minecraft/connect') {
+          json(res, 200, await runtime.minecraft.connect())
+          return
+        }
+        if (method === 'POST' && path === 'minecraft/teleport') {
+          const input = z.strictObject({ x: z.number().int(), y: z.number().int(), z: z.number().int() }).parse(await body(req))
+          json(res, 200, await runtime.minecraft.teleport(input))
+          return
+        }
+        if (method === 'POST' && path === 'minecraft/gamemode') {
+          const input = z.strictObject({ mode: z.enum(['creative', 'survival']) }).parse(await body(req))
+          if (input.mode === 'creative' && !runtime.minecraft.creativeBuildAllowed()) throw new RouteError(403, 'creative requires an authorized house build', 'minecraft-creative-refused')
+          if (input.mode === 'creative') runtime.minecraft.markCreativeForBuild()
+          json(res, 200, await runtime.minecraft.setGameMode(input.mode))
+          return
+        }
         if (method === 'GET' && path === 'minecraft/houses') {
           json(res, 200, await runtime.minecraft.houses())
           return
@@ -751,6 +767,12 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
               'cache-control': 'private, no-store', 'x-content-type-options': 'nosniff' })
             res.end(data)
           } finally { res.off('close', disconnect) }
+          return
+        }
+        const houseSite = /^minecraft\/houses\/([a-z0-9-]+)\/site$/u.exec(path)
+        if (method === 'PUT' && houseSite) {
+          const { zoneId } = z.strictObject({ zoneId: z.uuid() }).parse(await body(req))
+          json(res, 200, runtime.minecraft.authorizeHouseSite(z.uuid().parse(houseSite[1]), zoneId))
           return
         }
         const houseAction = /^minecraft\/houses\/([a-z0-9-]+)\/(preview|build)$/u.exec(path)
@@ -857,7 +879,7 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
           const input = await body(req)
           const action = minecraftMatch[1]
           if (action === 'login') json(res, 202, await runtime.minecraft.login())
-          else if (action === 'connect') json(res, 202, await runtime.minecraft.connect())
+          else if (action === 'connect') json(res, 202, await runtime.minecraft.connect(z.object({ atOwner: z.boolean().optional() }).parse(input).atOwner))
           else if (action === 'disconnect') json(res, 202, await runtime.minecraft.disconnect())
           else if (action === 'chat') json(res, 202, await runtime.minecraft.chat(z.object({ text: z.string().trim().min(1).max(256) }).parse(input).text))
           else if (action === 'follow') json(res, 202, await runtime.minecraft.follow())
