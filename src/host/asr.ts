@@ -5,11 +5,11 @@ import { wavChunks } from './wav.ts'
 
 const MAX_SECONDS = 15
 const WAV_OVERHEAD = 4096
-const ASR_RATES = [16_000, 44_100, 48_000]
+const ASR_RATES = [8000, 16_000, 22_050, 24_000, 32_000, 44_100, 48_000]
 export const MAX_ASR_WAV_BYTES = MAX_SECONDS * 48_000 * 2 + WAV_OVERHEAD
 const MAX_RESPONSE_BYTES = 32_768
 
-function validateAudio(wav: Buffer): void {
+export function validateAudio(wav: Buffer): void {
   const invalid = () => new DeviceAuthError(400, 'asr-invalid-wav')
   if (wav.length < 44 || wav.readUInt32LE(4) !== wav.length - 8) throw invalid()
   if (wav.length > MAX_ASR_WAV_BYTES) throw new DeviceAuthError(413, 'asr-audio-too-large')

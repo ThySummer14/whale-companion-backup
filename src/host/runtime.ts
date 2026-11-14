@@ -3,6 +3,8 @@ import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import { SessionId, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
+import { existsSync } from 'node:fs'
+import { homedir } from 'node:os'
 import { setTimeout as delay } from 'node:timers/promises'
 import { z } from 'zod'
 import { CompanionStore } from '../core/store.ts'
@@ -30,13 +32,16 @@ import { deviceFeedPostId } from './device-feed.ts'
 import type { DeviceFeedPublishInput } from './api-schemas.ts'
 import { companionToolPolicy } from './tool-policy.ts'
 import { MinecraftService, type MinecraftTransportOptions } from './minecraft.ts'
+import { MinecraftVoiceRelay } from './minecraft-voice.ts'
 import { MAX_BILIBILI_CLIP_SECONDS } from '../protocol/bilibili.ts'
 import { BilibiliService } from './bilibili.ts'
+import { QwenWatchService } from './qwen-watch.ts'
 import { SingingService, type SingingProvider } from './singing.ts'
 import type { SingingCoverProvider } from './singing-cover.ts'
 import type { SingingSeparatorProvider } from './singing-separation.ts'
 import type { SingingScoreProvider } from './singing-score.ts'
 import type { LocalAsrProvider } from './asr.ts'
+import type { DeepSeekAsrProvider } from './asr-deepseek.ts'
 import { VoicePrefixCache } from './voice-prefix.ts'
 import { VoicePrefixAttempt } from './voice-prefix-intent.ts'
 import { IdleCompactionService } from './idle-compaction.ts'
@@ -79,6 +84,7 @@ export class CompanionRuntime {
   readonly realtimeVoice: RealtimeVoiceService
   readonly minecraft: MinecraftService
   readonly bilibili: BilibiliService
+  readonly qwenWatch: QwenWatchService
   readonly singing: SingingService
   readonly worlds: ReturnType<typeof createWorldConnectors>
   private readonly events: EventHub[] = []
@@ -98,7 +104,7 @@ export class CompanionRuntime {
     minecraftServerRoot: string,
     minecraftOwner: string,
     private readonly realtimePcm?: RealtimePcmProvider,
-    readonly asr?: LocalAsrProvider,
+    readonly asr?: LocalAsrProvider | DeepSeekAsrProvider,
     singingProvider?: SingingProvider,
     coverProvider?: SingingCoverProvider,
     separatorProvider?: SingingSeparatorProvider,
@@ -113,6 +119,7 @@ export class CompanionRuntime {
     this.media = new MediaService(store, mediaRoot)
     this.deviceMedia = new DeviceMediaService(store, mediaRoot)
     this.bilibili = new BilibiliService(store, fetch, { ffmpeg: bilibiliFfmpeg, asr })
+    this.qwenWatch = new QwenWatchService(this.bilibili)
     this.singing = new SingingService(store, mediaRoot, singingProvider, coverProvider, separatorProvider, scoreProvider)
     const packageRoot = dirname(createRequire(import.meta.url).resolve('dsh-companion-bot/package.json'))
     this.avatar = new AvatarService(store, avatarRoot, join(packageRoot, 'lib', 'avatar'))
@@ -127,6 +134,9 @@ export class CompanionRuntime {
       return frame.available ? { ...frame, activity: selectHomeActivity(this.homeObservation(new Date(now), this.store.bindings(), { playback })) } : frame
     })
     if (realtimePcm) this.voicePrefixes = new VoicePrefixCache(realtimePcm)
+    const localVoiceDir = join(homedir(), '.local', 'share', 'companion', 'minecraft', 'voice')
+    const voiceDir = minecraftTransport?.voiceDir || (existsSync(join(localVoiceDir, 'owner')) ? localVoiceDir : '')
+    const minecraftVoice = voiceDir ? new MinecraftVoiceRelay(voiceDir, this.tts) : undefined
     this.minecraft = new MinecraftService(
       store, this.sessions, { dataDir, serverRoot: minecraftServerRoot, owner: minecraftOwner, wardrobeFile: minecraftWardrobeFile, ovoRoot: minecraftOvoRoot, ...minecraftTransport },
       event => this.autonomy.enqueueMinecraft(event),
@@ -137,6 +147,11 @@ export class CompanionRuntime {
       },
       () => this.autonomy.cancelMinecraftEventForCampPause(),
       () => this.autonomy.canReceiveMinecraftChat(),
+      minecraftVoice && ((taskId, text, stillAllowed) => {
+        void minecraftVoice.deliver(taskId, text, stillAllowed).catch(() => {
+          ctx.logger('companion').warn('Minecraft voice reply unavailable')
+        })
+      }),
     )
     this.autonomy = new AutonomyService(
       store, this.sessions, this.avatar,
@@ -764,6 +779,7 @@ export class CompanionRuntime {
 
   async close(): Promise<void> {
     this.voiceStopped = true
+    this.qwenWatch.close()
     this.worlds.beginStop()
     this.devicePlayback.close()
     await this.presenter.stop()

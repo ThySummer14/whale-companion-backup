@@ -2100,3 +2100,10 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 7 项 provider/service 新测试、48 项语音与歌唱回归、`pnpm typecheck` 通过。正式 Mac mini 已替换 bundle（旧包备份于 `backups/bundle-0.126.0-*`），plist 环境注入密钥（launchd 需 bootout+bootstrap 才加载新环境）；能力视图报告 `DeepSeek 云端 TTS · stella 官方音色`。模拟器端到端：聊天页 Listen → 云端合成 → Pause audio 播放态，宿主 `media/voice` 新增真实 WAV。
 - 资源清理：`ai.companion.bot.gsv` 服务 bootout、plist 移入 backups 禁用备份；删除 `gsv/GPT-SoVITS`、`.venv`、`nltk_data`、日志与测试音频（4.3G→324K），保留 `gsv/voice/` 参考音频供歌唱与回退；成功语音缓存（8.6MB）保留可重播，无孤儿临时文件。mini 未配置 ASR，无本地识别模型可删。
 - 未验：真机听感；WebSocket 实时流式接入（当前为整段流式收集）；云端下表情风格不可用属预期。
+
+## 153. Companion 0.128.0 云端 ASR 与 WebSocket 实时语音
+
+- 默认 `asrProvider=deepseek`：`POST https://api.deepseek.com/v1/tools/asr` multipart `file`（16 位 PCM WAV/Ogg Opus、≤8MiB、≤120s），密钥同 `DEEPSEEK_API_KEY`；错误映射为稳定设备码（413/429/503/422 等）。WAV 校验采样率白名单扩到官方七档（8000/16000/22050/24000/32000/44100/48000）——修复云端 TTS 的 24k WAV 被旧白名单拒收的往返断点。`asrProvider=local` + `asrEndpoint` 回退本地 loopback 转写。
+- 默认 `ttsStreamProtocol=deepseek`：`wss://api.deepseek.com/v1/tools/tts?voice_id=stella&format=pcm`，文本事件 + `finish_text`、二进制 24k PCM 帧、`finish` 错误码 surfaced；首句预warm与前缀接管复用现有管线；无密钥时实时语音优雅降级为整段 WAV。
+- 5 项 ASR、2 项实时协议新测试，合计 16 项定向 + 45 项语音/歌唱回归 + `pnpm typecheck` 通过。正式 Mac mini 部署 0.128.0 后验收：`transcribe` 能力 available；云端 TTS 音频→云端 ASR 往返，中文句子逐字正确（代码式 token `WHALE_UPGRADE_OK` 被误听，属识别质量而非管线缺陷）；`voice-stream` 200、318720 字节 = 6.64 秒 24k PCM；验收临时设备已撤销。模拟器聊天页“Transcription unavailable”横幅消失、麦克风与「Start voice conversation」入口可用。
+- 未验：真机真实录音输入（模拟器麦克风未接真实声源）；实时首句起播延迟未量化。

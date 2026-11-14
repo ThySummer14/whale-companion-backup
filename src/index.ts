@@ -30,6 +30,7 @@ import { registerBilibiliClipInput } from './host/bilibili-clip-input.ts'
 import { registerBilibiliChoiceBudget, registerFeedReplyBudget } from './host/bilibili-choice-budget.ts'
 import { RealtimePcmProvider, type RealtimePcmOptions } from './host/realtime-pcm.ts'
 import { LocalAsrProvider } from './host/asr.ts'
+import { DeepSeekAsrProvider } from './host/asr-deepseek.ts'
 import { AceStepSingingProvider } from './host/singing-provider.ts'
 import { ApplioRvcCoverProvider, SeedVcCoverProvider } from './host/singing-cover.ts'
 import { MlxDemucsSeparator } from './host/singing-separation.ts'
@@ -53,12 +54,13 @@ export const Config = s.object({
   ttsExpressiveModelDir: s.string().default('').description('Optional private prepared MLX IndexTTS model and speaker directory.'),
   ttsExpressiveTimeoutMs: s.number().min(15_000).max(240_000).step(1).default(180_000).description('Maximum milliseconds per expressive clip.'),
   ttsStreamEndpoint: s.string().default('').description('Exact loopback HTTP PCM endpoint for live speech. Empty keeps WAV clips.'),
-  ttsStreamProtocol: s.union(['openai', 'voxweft', 'gpt-sovits-v2']).default('openai').description('Request protocol for the live PCM endpoint.'),
+  ttsStreamProtocol: s.union(['openai', 'voxweft', 'gpt-sovits-v2', 'deepseek']).default('deepseek').description('Request protocol for the live PCM endpoint.'),
   ttsStreamModel: s.string().default('').description('Fixed model ID for the OpenAI-compatible PCM endpoint.'),
   ttsStreamVoice: s.string().default('').description('Fixed clone voice ID for OpenAI-compatible and VoxWeft PCM endpoints.'),
   ttsStreamSampleRate: s.number().min(8000).max(48_000).step(1).description('Override PCM sample rate. Defaults to 24000 for OpenAI and 48000 for VoxWeft or GPT-SoVITS v5.'),
   ttsStreamTimeoutMs: s.number().min(1000).max(60_000).step(1).default(30_000).description('Maximum milliseconds for each PCM stream.'),
-  asrEndpoint: s.string().default('').description('Exact loopback HTTP endpoint for WAV transcription. Empty disables device transcription.'),
+  asrEndpoint: s.string().default('').description('Exact loopback HTTP endpoint for WAV transcription. Empty disables local transcription.'),
+  asrProvider: s.string().default('deepseek').description('Transcription provider: deepseek cloud or local loopback endpoint.'),
   asrTimeoutMs: s.number().min(1000).max(60_000).step(1).default(15_000).description('Maximum milliseconds for a device recording upload and transcription.'),
   bilibiliFfmpegPath: s.string().default('').description('Absolute FFmpeg executable for Bilibili clip sampling. Empty uses ffmpeg on PATH.'),
   singingApiOrigin: s.string().default('').description('Local ACE-Step 1.5 HTTP origin, such as http://127.0.0.1:8001. Empty disables song generation.'),
@@ -99,6 +101,7 @@ const packageJson = createRequire(import.meta.url)('../package.json') as { versi
 export function apply(ctx: Context, config: CompanionConfig): void {
   if (config.dataDir && !isAbsolute(config.dataDir)) throw new Error('Companion dataDir must be absolute or empty')
   if (config.ttsProvider !== 'piper' && config.ttsProvider !== 'gpt-sovits' && config.ttsProvider !== 'deepseek') throw new Error('Unsupported Companion TTS provider')
+  if (config.asrProvider !== 'deepseek' && config.asrProvider !== 'local') throw new Error('Unsupported Companion ASR provider')
   for (const path of [config.ttsPythonPath, config.ttsModelPath, config.ttsReferenceAudio, config.ttsExpressivePythonPath, config.ttsExpressiveModelDir, config.avatarDir, config.minecraftServerRoot, config.minecraftConsoleFifo, config.minecraftVoiceDir, config.bilibiliFfmpegPath, config.minecraftOvoRoot]) if (path && !isAbsolute(path)) throw new Error('Companion executable and asset paths must be absolute or empty')
   if (Boolean(config.ttsExpressivePythonPath) !== Boolean(config.ttsExpressiveModelDir)) throw new Error('Expressive TTS requires both Python and model paths')
   const dataDir = config.dataDir || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'companion')
@@ -106,20 +109,25 @@ export function apply(ctx: Context, config: CompanionConfig): void {
   const gsvDir = join(homedir(), '.local', 'share', 'companion', 'gsv')
   const referenceAudio = config.ttsReferenceAudio || join(gsvDir, 'voice', 'deepseek_ref_b_7s.wav')
   let realtimePcm: RealtimePcmProvider | undefined
-  if (config.ttsStreamEndpoint) {
-    const base = { endpoint: config.ttsStreamEndpoint, sampleRate: config.ttsStreamSampleRate, timeoutMs: config.ttsStreamTimeoutMs }
+  if (config.ttsStreamEndpoint || config.ttsStreamProtocol === 'deepseek') {
+    const base = { endpoint: config.ttsStreamEndpoint || 'wss://api.deepseek.com/v1/tools/tts', sampleRate: config.ttsStreamSampleRate, timeoutMs: config.ttsStreamTimeoutMs }
     const protocol = config.ttsStreamProtocol
-    let options: RealtimePcmOptions
-    if (protocol === 'gpt-sovits-v2') {
+    let options: RealtimePcmOptions | undefined
+    if (protocol === 'deepseek') {
+      const apiKey = process.env.DEEPSEEK_API_KEY?.trim() ?? ''
+      if (apiKey) options = { ...base, protocol, apiKey }
+    } else if (protocol === 'gpt-sovits-v2') {
       options = { ...base, protocol, referenceAudio, referenceText: config.ttsReferenceText, referenceLanguage: config.ttsReferenceLanguage }
     } else if (protocol === 'voxweft') {
       options = { ...base, protocol, voice: config.ttsStreamVoice }
     } else {
       options = { ...base, protocol, model: config.ttsStreamModel, voice: config.ttsStreamVoice }
     }
-    realtimePcm = new RealtimePcmProvider(options)
+    if (options) realtimePcm = new RealtimePcmProvider(options)
   }
-  const asr = config.asrEndpoint ? new LocalAsrProvider(config.asrEndpoint, config.asrTimeoutMs) : undefined
+  const asr = config.asrProvider === 'deepseek'
+    ? (process.env.DEEPSEEK_API_KEY?.trim() ? new DeepSeekAsrProvider({ apiKey: process.env.DEEPSEEK_API_KEY.trim(), timeoutMs: config.asrTimeoutMs }) : undefined)
+    : config.asrEndpoint ? new LocalAsrProvider(config.asrEndpoint, config.asrTimeoutMs) : undefined
   const singing = config.singingApiOrigin ? new AceStepSingingProvider(config.singingApiOrigin, config.singingTimeoutMs) : undefined
   const seedVcPaths = [config.seedVcPythonPath, config.seedVcRepoDir, config.seedVcReferenceAudio]
   if (seedVcPaths.some(Boolean) && !seedVcPaths.every(path => !!path && isAbsolute(path))) throw new Error('Configure all Seed-VC paths as absolute paths')

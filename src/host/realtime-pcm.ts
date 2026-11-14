@@ -1,6 +1,7 @@
 import { addAbortListener } from 'node:events'
 import { Agent, request, type IncomingMessage } from 'node:http'
 import { isAbsolute } from 'node:path'
+import WebSocket from 'ws'
 import { loopbackHttpEndpoint } from './security.ts'
 
 interface PcmOptions {
@@ -13,6 +14,7 @@ export type RealtimePcmOptions = PcmOptions & (
   | { protocol: 'openai'; model: string; voice: string }
   | { protocol: 'voxweft'; voice: string }
   | { protocol: 'gpt-sovits-v2'; referenceAudio: string; referenceText: string; referenceLanguage: string }
+  | { protocol: 'deepseek'; apiKey: string }
 )
 
 export class RealtimePcmError extends Error {}
@@ -47,14 +49,17 @@ export class RealtimePcmProvider {
   private prefix?: PrefixLease
 
   constructor(private readonly options: RealtimePcmOptions) {
-    this.endpoint = loopbackHttpEndpoint(options.endpoint, 'Companion PCM')
-    this.sampleRate = options.sampleRate ?? (options.protocol === 'openai' ? 24_000 : 48_000)
+    this.endpoint = options.protocol === 'deepseek' ? new URL(options.endpoint) : loopbackHttpEndpoint(options.endpoint, 'Companion PCM')
+    if (options.protocol === 'deepseek' && !['ws:', 'wss:'].includes(this.endpoint.protocol)) throw new Error('DeepSeek PCM requires a WebSocket URL')
+    this.sampleRate = options.sampleRate ?? (options.protocol === 'openai' || options.protocol === 'deepseek' ? 24_000 : 48_000)
     if (!Number.isInteger(this.sampleRate) || this.sampleRate < 8000 || this.sampleRate > 48_000) throw new Error('Invalid Companion PCM sample rate')
     if (!Number.isInteger(options.timeoutMs) || options.timeoutMs < 1000 || options.timeoutMs > 60_000) throw new Error('Invalid Companion PCM timeout')
     if (options.protocol === 'openai') {
       if (!options.model.trim() || options.model.length > 128 || !options.voice.trim() || options.voice.length > 128) throw new Error('Companion PCM requires a fixed model and voice')
     } else if (options.protocol === 'voxweft') {
       if (this.endpoint.pathname !== '/generate' || !/^[a-zA-Z0-9._-]{1,128}$/u.test(options.voice)) throw new Error('VoxWeft PCM requires /generate and a named voice')
+    } else if (options.protocol === 'deepseek') {
+      if (!options.apiKey.trim()) throw new Error('DeepSeek PCM requires an API key')
     } else if (!isAbsolute(options.referenceAudio) || !options.referenceText.trim() || !options.referenceLanguage.trim()) {
       throw new Error('Invalid GPT-SoVITS PCM reference voice')
     }
@@ -174,6 +179,62 @@ export class RealtimePcmProvider {
     }
   }
 
+  private async *readDeepSeek(text: string, signal: AbortSignal): AsyncGenerator<Buffer> {
+    const url = new URL(this.endpoint)
+    url.searchParams.set('voice_id', 'stella')
+    url.searchParams.set('format', 'pcm')
+    const socket = new WebSocket(url, { headers: { authorization: `Bearer ${(this.options as { apiKey: string }).apiKey.trim()}` } })
+    const queue: Buffer[] = []
+    let wake: (() => void) | undefined
+    let done = false
+    let failure: RealtimePcmError | undefined
+    const notify = () => { wake?.(); wake = undefined }
+    socket.on('message', (data, isBinary) => {
+      if (isBinary) {
+        queue.push(Buffer.from(data as Buffer))
+        notify()
+        return
+      }
+      let message: { event?: string; code?: string }
+      try { message = JSON.parse(String(data)) } catch { return }
+      if (message.event === 'finish') {
+        if (message.code !== 'success') failure = new RealtimePcmError(`voice-stream-${message.code ?? 'provider-error'}`)
+        done = true
+        notify()
+      }
+    })
+    socket.on('error', () => {
+      failure ??= new RealtimePcmError('voice-stream-provider-error')
+      done = true
+      notify()
+    })
+    socket.on('close', () => { done = true; notify() })
+    const abort = () => { done = true; socket.close(); notify() }
+    signal.addEventListener('abort', abort, { once: true })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        socket.once('open', resolve)
+        socket.once('error', reject)
+      })
+      signal.throwIfAborted()
+      socket.send(JSON.stringify({ event: 'text', text }))
+      socket.send(JSON.stringify({ event: 'finish_text' }))
+      for (;;) {
+        signal.throwIfAborted()
+        if (queue.length) {
+          yield queue.shift()!
+          continue
+        }
+        if (failure) throw failure
+        if (done) return
+        await new Promise<void>(resolve => { wake = resolve })
+      }
+    } finally {
+      signal.removeEventListener('abort', abort)
+      socket.close()
+    }
+  }
+
   private request(url: URL, signal: AbortSignal, body?: string): Promise<IncomingMessage> {
     return new Promise((resolve, reject) => {
       const req = request(url, {
@@ -206,6 +267,10 @@ export class RealtimePcmProvider {
 
   private async *read(input: string, signal: AbortSignal): AsyncGenerator<Buffer> {
     const options = this.options
+    if (options.protocol === 'deepseek') {
+      yield* this.readDeepSeek(input, signal)
+      return
+    }
     let payload
     switch (options.protocol) {
       case 'openai':

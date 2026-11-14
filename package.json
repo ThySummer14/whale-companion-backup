@@ -1,6 +1,6 @@
 {
   "name": "dsh-companion-bot",
-  "version": "0.127.0",
+  "version": "0.128.0",
   "private": true,
   "description": "A single-character companion workbench for DeepSeek Harness",
   "license": "UNLICENSED",
