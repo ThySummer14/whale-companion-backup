@@ -2107,3 +2107,11 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 默认 `ttsStreamProtocol=deepseek`：`wss://api.deepseek.com/v1/tools/tts?voice_id=stella&format=pcm`，文本事件 + `finish_text`、二进制 24k PCM 帧、`finish` 错误码 surfaced；首句预warm与前缀接管复用现有管线；无密钥时实时语音优雅降级为整段 WAV。
 - 5 项 ASR、2 项实时协议新测试，合计 16 项定向 + 45 项语音/歌唱回归 + `pnpm typecheck` 通过。正式 Mac mini 部署 0.128.0 后验收：`transcribe` 能力 available；云端 TTS 音频→云端 ASR 往返，中文句子逐字正确（代码式 token `WHALE_UPGRADE_OK` 被误听，属识别质量而非管线缺陷）；`voice-stream` 200、318720 字节 = 6.64 秒 24k PCM；验收临时设备已撤销。模拟器聊天页“Transcription unavailable”横幅消失、麦克风与「Start voice conversation」入口可用。
 - 未验：真机真实录音输入（模拟器麦克风未接真实声源）；实时首句起播延迟未量化。
+
+## 154. Companion 0.128.0 App 侧：音乐页 MyGo 舞台化（仅 App，无需宿主 redeploy）
+
+- 音乐页改为 MyGo 设计语言的暗色曲库（#141416 / 胶囊搜索 / 封面行），Now Playing 从底部弹层改为全屏舞台（`music_stage.dart`）：封面色晕染背景（专辑图平均色 → accent 混白 45%）、胶囊页签「歌词 / 封面 / 播放队列」、整屏歌词面板（LRC 解析 + 位置驱动高亮与滚动）、队列点播、毫秒刻度进度滑条（沿用旧 NP 的 onChangeEnd 毫秒契约）、shuffle/prev/白色圆形播放/next/repeat。
+- 归档曲目暂不含歌词文本（宿主歌唱任务不存 lyrics），歌词面板保留 MyGo 空态；解析与高亮机制已就绪，歌词下发随源插件片（任务 #7）接入。
+- 测试：新增 `music_stage_test.dart` 3 项（队列点播/面板切换、shuffle 保持当前首置 + repeat 三态、LRC 解析与活跃行），`songs_test.dart` 改指新舞台并保持原行为断言；whale 全套 143 过 + 1 跳过。`WHALE_MUSIC_PREVIEW_DIR` 渲染捕获见 `.work/music-preview/`。
+- 模拟器实测：暗色曲库与空态正确（正式 mini 歌唱归档当前为空，她唱完归档后才会列歌）；带数据舞台见渲染捕获。未验：真机听感与触控手感。
+- App 改动位于 `apps/dsh-go` 子仓库，按该仓库协作规则未提交；宿主 bundle 无变更，不需要 redeploy。
