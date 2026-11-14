@@ -87,6 +87,7 @@ export class CompanionRuntime {
   readonly qwenWatch: QwenWatchService
   readonly singing: SingingService
   musicPlugins?: import('./music-plugins.ts').MusicPluginService
+  ocr?: import('./ocr-deepseek.ts').DeepSeekOcrProvider
   readonly worlds: ReturnType<typeof createWorldConnectors>
   private readonly events: EventHub[] = []
   private readonly voiceTurns = new Map<string, VoiceReplyTurn>()

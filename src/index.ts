@@ -33,6 +33,8 @@ import { LocalAsrProvider } from './host/asr.ts'
 import { DeepSeekAsrProvider } from './host/asr-deepseek.ts'
 import { DeviceAuthError } from './host/devices.ts'
 import { MusicPluginService } from './host/music-plugins.ts'
+import { DeepSeekOcrProvider } from './host/ocr-deepseek.ts'
+import { registerOcrTools } from './host/ocr-tools.ts'
 import { AceStepSingingProvider } from './host/singing-provider.ts'
 import { ApplioRvcCoverProvider, SeedVcCoverProvider } from './host/singing-cover.ts'
 import { MlxDemucsSeparator } from './host/singing-separation.ts'
@@ -195,6 +197,9 @@ export function apply(ctx: Context, config: CompanionConfig): void {
     return item
   })
   runtime.musicPlugins.start()
+  runtime.ocr = process.env.DEEPSEEK_API_KEY?.trim()
+    ? new DeepSeekOcrProvider({ apiKey: process.env.DEEPSEEK_API_KEY.trim(), timeoutMs: 180_000 })
+    : undefined
   runtime.attachEvents(new EventHub(ctx, store))
   runtime.attachEvents(new EventHub(ctx, store, {
     path: '/companion-device/api/events',
@@ -226,6 +231,7 @@ export function apply(ctx: Context, config: CompanionConfig): void {
   if (avatarViewer) ctx.effect(() => avatarViewer.register())
   ctx.effect(() => registerMemoryTools(ctx, store))
   ctx.effect(() => registerFeedTools(ctx, runtime))
+  ctx.effect(() => registerOcrTools(ctx, runtime))
   ctx.effect(() => registerPersonaPrompt(ctx, store))
   ctx.effect(() => registerMinecraftChatPrompt(ctx, store))
   ctx.effect(() => registerMinecraftHouseTool(ctx, runtime))

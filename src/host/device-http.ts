@@ -1,6 +1,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createReadStream, statSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 import { BILIBILI_CLIP_CONTEXT, BILIBILI_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_RECOVERY_CONTEXT, MINECRAFT_SHARE_CONTEXT, type ActivityRecord } from '../core/model.ts'
 import { HOUSE_COMPLETION_TASK_PREFIX } from '../core/minecraft-house-verification.ts'
@@ -231,6 +232,24 @@ async function wavBody(req: IncomingMessage, signal: AbortSignal): Promise<Buffe
   }
 }
 
+async function ocrBody(req: IncomingMessage, res: ServerResponse): Promise<Buffer> {
+  const limit = 20 * 1024 * 1024
+  const tooLarge = () => new DeviceAuthError(413, 'ocr-file-too-large')
+  if (Number(req.headers['content-length'] ?? 0) > limit) throw tooLarge()
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req.iterator({ destroyOnReturn: false })) {
+    const bytes = Buffer.from(chunk)
+    size += bytes.length
+    if (size > limit) {
+      if (!res.writableFinished) res.destroy()
+      throw tooLarge()
+    }
+    chunks.push(bytes)
+  }
+  return Buffer.concat(chunks, size)
+}
+
 function failure(error: unknown): [number, { error: string; code?: string }] {
   if (error instanceof DeviceAuthError) return [error.status, { error: error.code, code: error.code }]
   if (error instanceof RealtimePcmError) {
@@ -349,6 +368,25 @@ export function registerDeviceHttp(ctx: Context, runtime: CompanionRuntime, devi
               throw new DeviceAuthError(400, 'invalid-request')
             }
             json(res, 200, runtime.singing.archive(url.searchParams.get('cursor') ?? undefined))
+            return
+          }
+          if (method === 'POST' && path === 'ocr') {
+            if (!runtime.ocr?.configured()) throw new DeviceAuthError(503, 'ocr-unconfigured')
+            const purpose = url.searchParams.get('purpose') === 'rich_layout_recognition' ? 'rich_layout_recognition' : 'text_recognition'
+            const type = (req.headers['content-type'] ?? '').split(';', 1)[0]?.trim().toLowerCase()
+            let bytes: Buffer
+            let filename: string
+            if (type === 'application/json') {
+              const input = z.strictObject({ mediaId: z.string().uuid() }).parse(await body(req, 1024))
+              const asset = runtime.store.media.get(input.mediaId)
+              if (!asset) throw new DeviceAuthError(404, 'ocr-media-not-found')
+              bytes = await readFile(asset.path)
+              filename = asset.path.split('/').pop() ?? 'file'
+            } else {
+              bytes = await ocrBody(req, res)
+              filename = url.searchParams.get('name')?.slice(0, 120) || 'upload'
+            }
+            json(res, 200, await runtime.ocr.recognize(bytes, filename, purpose))
             return
           }
           if (method === 'GET' && path === 'music/plugins') {

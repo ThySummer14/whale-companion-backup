@@ -2144,3 +2144,9 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 音乐页新增源 chips（归档 / 各已加载插件，如「大肥鱼翻唱」「Demo」），浅色跟随 App 主题；选中插件源后列表来自 `music/plugins/:id/search`，播放经 `music/plugins/:id/stream/:trackId` 鉴权下载（`SongArchiveItem.pluginId` 标记；bytes 未知时以响应 contentLength 为准并受 `_maxSongBytes` 封顶，仍校验 RIFF/WAVE 与实收字节）。
 - 新增 2 项测试（源切换渲染与回切、插件流路由下载字节一致），whale 全套 145 过 + 1 跳过；模拟器端到端：切「大肥鱼翻唱」→ 播放归档翻唱 → Now Playing 舞台正常播放（截图 `.work/app-preview/music-plugin-source.png` / `music-plugin-nowplaying.png`）。验收后模拟器已停止以释放内存。
 - Demo 插件的 mp3 流暂不支持 App 内播放（下载校验仅接受 WAV），dafeiyu 源为 WAV 不受影响；如需 mp3 源后续扩展校验与原生播放格式。
+
+## 159. Companion 0.128.0 DeepSeek OCR 接入
+
+- 新增 `DeepSeekOcrProvider`（`POST /v1/tools/ocr`，multipart file+purpose，逐页 text；200 响应仍可能带 error 对象需检查；前导换行属 JSON 空白）；宿主侧 20MiB 上限（官方 100MiB，保护 mini 内存）、180s 超时；密钥同 `DEEPSEEK_API_KEY`。
+- Agent 工具 `companion_ocr(mediaId, purpose?)`：读媒体库真实资产逐页识别，私有评估场景禁用；设备路由 `POST ocr` 支持 raw image/pdf body 与 JSON mediaId 两分支。
+- 4 项 provider 测试（multipart/前导换行、in-body error、状态映射、尺寸/页数校验）+ 设备回归全绿；正式机用真实舞台截图验收：中文与界面文字逐字识别（含「空城计（大肥鱼翻唱）」），验收临时设备已撤销。
