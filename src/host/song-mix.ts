@@ -99,6 +99,24 @@ export function allocateSongWav(rate: number, channels: number, frames: number):
   return wav
 }
 
+export function normalizeSongPeak(contents: Buffer, targetDb = -1.5): Buffer {
+  let data: Buffer | undefined
+  for (const { kind, start, size } of wavChunks(contents)) if (kind === 'data') data = contents.subarray(start, start + size)
+  if (!data || !data.some(byte => byte !== 0)) return contents
+  const { pcm } = parseSongWav(contents, 0, 3600)
+  let peak = 0
+  for (let i = 0; i < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)))
+  const target = Math.round(32767 * 10 ** (targetDb / 20))
+  if (!peak || peak === target) return contents
+  const out = Buffer.from(contents)
+  const view = parseSongWav(out, 0, 3600).pcm
+  const scale = target / peak
+  for (let i = 0; i < view.length; i += 2) {
+    view.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(view.readInt16LE(i) * scale))), i)
+  }
+  return out
+}
+
 export async function mixSongWav(vocal: SongWav, backing: SongWav, vocalGainDb: number, backingGainDb: number, signal: AbortSignal): Promise<Buffer> {
   signal.throwIfAborted()
   const channels = Math.max(vocal.channels, backing.channels)

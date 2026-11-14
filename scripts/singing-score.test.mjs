@@ -57,6 +57,17 @@ async function terminal(store, id) {
   assert.fail('Score task did not settle')
 }
 
+const peakNormalized = (buf) => {
+  const pcm = parseSongWav(buf).pcm
+  let peak = 0
+  for (let i = 0; i < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)))
+  const target = Math.round(32767 * 10 ** (-1.5 / 20))
+  const out = Buffer.from(buf)
+  const view = parseSongWav(out).pcm
+  for (let i = 0; i < view.length; i += 2) view.writeInt16LE(Math.round(view.readInt16LE(i) * target / peak), i)
+  return out
+}
+
 test('score schema checks alignment, rests, melisma and finite rhythm before inference', () => {
   assert.equal(scoreDurationSeconds(SingingScoreInputSchema.parse(input)), 5)
   const update = (i, value) => input.notes.map((note, n) => n === i ? { ...note, ...value } : note)
@@ -97,7 +108,7 @@ test('owner endpoint queues a score and verifies both PCM stages before archival
   assert.deepEqual(calls, [input, 'cover'])
   assert.equal(singing.view().tasks[0].coverEngine, 'applio-rvc')
   assert.equal(singing.archive().items[0].id, accepted.task.id)
-  assert.deepEqual(Buffer.from((await singing.audio(accepted.task.id)).data), audio)
+  assert.deepEqual(Buffer.from((await singing.audio(accepted.task.id)).data), peakNormalized(audio))
   const receipt = store.activities().find(activity => activity.kind === 'song.archived')
   assert.equal(receipt.data.mode, 'score')
   assert.equal(receipt.data.coverEngine, 'applio-rvc')
@@ -124,11 +135,12 @@ test('archived score silences explicit rests while preserving adjacent sung samp
   assert.equal((await terminal(store, task.id)).status, 'succeeded')
   const result = Buffer.from((await singing.audio(task.id)).data)
   const sample = seconds => result.readInt16LE(44 + Math.round(seconds * 16_000) * 2)
-  assert.equal(sample(1.999), 700)
-  assert.ok(sample(2.006) > 0 && sample(2.006) < 700)
+  const loud = Math.round(32767 * 10 ** (-1.5 / 20))
+  assert.equal(sample(1.999), loud)
+  assert.ok(sample(2.006) > 0 && sample(2.006) < loud)
   assert.ok(result.subarray(44 + 2.02 * 32_000, 44 + 2.98 * 32_000).every(byte => byte === 0))
-  assert.ok(sample(2.994) > 0 && sample(2.994) < 700)
-  assert.equal(sample(3.001), 700)
+  assert.ok(sample(2.994) > 0 && sample(2.994) < loud)
+  assert.equal(sample(3.001), loud)
   assert.equal(audio.readInt16LE(44 + 2.5 * 32_000), 700)
 })
 
@@ -195,9 +207,10 @@ test('long score batches one guide, converts at planned seams and archives a sin
   assert.equal(singing.view().tasks[0].audio.durationSeconds, 72)
   const result = parseSongWav(Buffer.from((await singing.audio(task.id)).data), 72, 72)
   assert.equal(result.channels, 1)
-  assert.equal(result.pcm.readInt16LE(1 * 48_000 * 2), 600)
-  assert.equal(result.pcm.readInt16LE(25 * 48_000 * 2), 700)
-  assert.equal(result.pcm.readInt16LE(49 * 48_000 * 2), 800)
+  const scale = Math.round(32767 * 10 ** (-1.5 / 20)) / 800
+  assert.equal(result.pcm.readInt16LE(1 * 48_000 * 2), Math.round(600 * scale))
+  assert.equal(result.pcm.readInt16LE(25 * 48_000 * 2), Math.round(700 * scale))
+  assert.equal(result.pcm.readInt16LE(49 * 48_000 * 2), Math.round(800 * scale))
   assert.ok(result.pcm.subarray(23.52 * 48_000 * 2, 23.98 * 48_000 * 2).every(byte => byte === 0))
   assert.equal(store.activities().find(activity => activity.kind === 'song.archived').data.conversionBlocks, 3)
 })

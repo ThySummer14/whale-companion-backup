@@ -11,7 +11,7 @@ import { DeviceAuthError } from './devices.ts'
 import type { SingingCoverProvider } from './singing-cover.ts'
 import type { SingingSeparatorProvider } from './singing-separation.ts'
 import { convertLongScore, MAX_SCORE_TIMING_DRIFT_SECONDS, silenceScoreRests, type SingingScoreProvider } from './singing-score.ts'
-import { mixSongWav, parseSongWav, songVocalEnvelope, songVocalSampleCount, validSongGain, type SingingCoverMix, type SongWav } from './song-mix.ts'
+import { mixSongWav, normalizeSongPeak, parseSongWav, songVocalEnvelope, songVocalSampleCount, validSongGain, type SingingCoverMix, type SongWav } from './song-mix.ts'
 import type { WorldHealth } from '../protocol/worlds.ts'
 
 const CAPABILITY = 'media.singing'
@@ -232,18 +232,33 @@ export class SingingService {
     return this.describe(this.store.transitionTask(id, 'cancelled', '已停止本地歌唱任务'))
   }
 
-  archive(): DeviceSingingArchive {
+  archive(cursor?: string): DeviceSingingArchive {
+    let before: { createdAt: string; id: string } | undefined
+    if (cursor !== undefined) {
+      try {
+        if (!/^[A-Za-z0-9_-]{1,180}$/u.test(cursor)) throw new Error('Invalid cursor')
+        const parsed = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'))
+        if (typeof parsed?.createdAt !== 'string' || new Date(parsed.createdAt).toISOString() !== parsed.createdAt ||
+            typeof parsed.id !== 'string' || !TASK_ID.test(parsed.id)) throw new Error('Invalid cursor')
+        before = { createdAt: parsed.createdAt, id: parsed.id }
+      } catch { throw new DeviceAuthError(400, 'invalid-song-cursor') }
+    }
     const items: DeviceSingingTrack[] = []
-    for (const entry of this.store.media.list({ kind: 'song', limit: 100 })) {
-      const task = entry.source === 'singing' ? this.store.taskById(entry.id) : undefined
+    const rows = this.store.media.singingPage(before)
+    const page = rows.slice(0, 20)
+    for (const entry of page) {
+      const task = this.store.taskById(entry.id)
       const asset = task?.capabilityId === CAPABILITY ? this.asset(task) : undefined
       if (task && asset) {
         const durationSeconds = this.store.media.songDuration(asset.id, asset.hash!)
         items.push({ id: task.id, title: task.title, createdAt: task.createdAt, bytes: asset.bytes, mimeType: 'audio/wav', durationSeconds })
       }
     }
-    items.sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    return { version: 1, items: items.slice(0, 20) }
+    const last = page.at(-1)
+    const nextCursor = rows.length > page.length && last
+      ? Buffer.from(JSON.stringify({ createdAt: last.createdAt, id: last.id })).toString('base64url')
+      : undefined
+    return { version: 1, items, ...(nextCursor && { nextCursor }) }
   }
 
   async audio(id: string, signal?: AbortSignal, includeVocalEnvelope = false): Promise<{ filePath: string; bytes: number; mimeType: 'audio/wav'; data: Uint8Array; vocalEnvelope?: Uint8Array }> {
@@ -387,7 +402,7 @@ export class SingingService {
       }
       if (mode === 'source-cover') run.coverPhase = 'mixing'
       const vocalEnvelope = mix ? await songVocalEnvelope(wav, signal) : undefined
-      const contents = mix ? await mixSongWav(wav, mix.backing, mix.vocalGainDb, mix.backingGainDb, signal) : vocal
+      const contents = normalizeSongPeak(mix ? await mixSongWav(wav, mix.backing, mix.vocalGainDb, mix.backingGainDb, signal) : vocal)
       signal.throwIfAborted()
       if (mode === 'source-cover' || mode === 'score') run.coverPhase = 'archiving'
       const file = await open(temp, 'wx', 0o600)

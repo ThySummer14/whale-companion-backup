@@ -2123,3 +2123,10 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 环境偏差（如实记录）：mini 无 brew/Python 3.12，改用 npmmirror 的 python-build-standalone 3.12.16（与测试同大版本），依赖 pins 保持 Applio 原样；mini 外网带宽慢导致在线 pip 卡死/极慢，改为本机清华源下载 115 个 wheel（449MB）经 Tailscale 传输后 `--no-index` 离线安装；openrsync 目录语义造成 demucs 缓存嵌套一层，已修正并校验关键文件路径。torch 2.11.0 MPS 可用、demucs-mlx 1.6.1 自检通过。
 - 音乐页主题修复：曲库整页改用统一暗色 theme 对象（此前搜索框/专辑标题误用外层浅色 theme，暗底上出现白底搜索框与深色标题）。
 - 未验：真机听感（翻唱音色主观验收）；长按/队列等触控手感；SoulX 按谱合成仍未在正式机配置（独立推进）。
+
+## 156. Companion 0.128.0 归档响度归一化与音乐页跟随 App 主题
+
+- 修「翻唱声音小」：实测源音频 peak -9.2 dBFS、旧归档 peak -9.3 / RMS -24.8 dBFS（混音默认人声 -2dB、伴奏 -10dB 且无归一化），相对近满幅的 TTS 明显偏轻。归档前新增 `normalizeSongPeak`：峰值归一到 -1.5 dBFS，静音原样保留、波形比例不变；归一化自身不再施加时长上下限（时长校验仍在上游）。混音/按谱/服务三套测试改为独立峰值与比例断言，全绿。
+- 音乐页曲库改回跟随 App 自身浅色主题（移除强加的暗色 wrapper），保留 MyGo 布局（胶囊搜索、封面行、迷你播放器）；Now Playing 沉浸舞台按 MyGo 设计在两种主题下均为暗色，保持不变。UI 以测试渲染捕获验收（`.work/music-preview/`），期间模拟器保持停止以控制本机内存。
+- 内存注意：本机与 mini 均曾接近内存上限；模拟器（qemu 约 5.5GB）已停止，mini 最大常驻为 Minecraft 服务端 4G 堆。后续真机/模拟器验收前先确认空闲内存。
+- 正式机复跑《空城计》源翻唱（任务 `d630c5c5`）实测：新归档 RMS -16.7 dBFS、peak -1.5 dBFS（旧归档 -24.8 / -9.3），响度问题修复确认。

@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path'
 import { setImmediate as nextTick, setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { CompanionStore } from '../src/core/store.ts'
+import { parseSongWav } from '../src/host/song-mix.ts'
 import { SingingService } from '../src/host/singing.ts'
 import { CompanionRuntime } from '../src/host/runtime.ts'
 
@@ -68,8 +69,14 @@ test('only verified WAV bytes are archived as a private retained song with a dur
   await assert.rejects(service.audio(task.id), { code: 'singing-audio-not-found' })
   assert.equal((await settled(store, task.id)).status, 'succeeded')
   const result = await service.audio(task.id)
-  assert.deepEqual(result, { filePath: join(songs, `${task.id}.wav`), bytes: bytes.length, mimeType: 'audio/wav', data: bytes })
-  assert.deepEqual(readFileSync(result.filePath), bytes)
+  assert.equal(result.filePath, join(songs, `${task.id}.wav`))
+  assert.equal(result.bytes, bytes.length)
+  assert.equal(result.mimeType, 'audio/wav')
+  const archivedPcm = parseSongWav(result.data).pcm
+  let archivedPeak = 0
+  for (let i = 0; i < archivedPcm.length; i += 2) archivedPeak = Math.max(archivedPeak, Math.abs(archivedPcm.readInt16LE(i)))
+  assert.equal(archivedPeak, Math.round(32767 * 10 ** (-1.5 / 20)))
+  assert.deepEqual(readFileSync(result.filePath), result.data)
   assert.equal(statSync(result.filePath).mode & 0o777, 0o600)
   assert.equal(statSync(songs).mode & 0o777, 0o700)
   const archive = store.media.get(task.id)
@@ -84,8 +91,33 @@ test('only verified WAV bytes are archived as a private retained song with a dur
   assert.equal(receipt.data.durationSeconds, 10)
   assert.doesNotMatch(JSON.stringify(store.activities()), /原创歌词/u)
   assert.deepEqual(notices(), [{ kind: 'song-ready', taskId: task.id }])
+  assert.equal(service.archive().items[0].id, task.id)
   await service.close()
   assert.deepEqual(readdirSync(songs), [`${task.id}.wav`])
+})
+
+test('music pages use archive order, retain older songs, and reject invalid cursors', t => {
+  const { store, service } = fixture(t)
+  const ids = []
+  for (let i = 0; i < 23; i++) {
+    const task = store.createTask({ capabilityId: 'media.singing', title: `音乐作品 ${i}` })
+    store.transitionTask(task.id, 'running')
+    store.transitionTask(task.id, 'succeeded')
+    const archivedAt = new Date(Date.UTC(2026, 10, 12, 0, i)).toISOString()
+    store.media.upsert({
+      id: task.id, kind: 'song', path: `songs/${task.id}.wav`, hash: 'test',
+      mimeType: 'audio/wav', bytes: 100, source: 'singing', sourceRef: task.id, retention: 'keep',
+      createdAt: archivedAt, lastUsedAt: archivedAt, lastVerifiedAt: archivedAt,
+    })
+    ids.unshift(task.id)
+  }
+  const first = service.archive()
+  assert.deepEqual(first.items.map(item => item.id), ids.slice(0, 20))
+  store.media.touch(`songs/${ids.at(-1)}.wav`, '2027-01-01T00:00:00.000Z')
+  const second = service.archive(first.nextCursor)
+  assert.deepEqual(second.items.map(item => item.id), ids.slice(20))
+  assert.equal(second.nextCursor, undefined)
+  assert.throws(() => service.archive('invalid'), { code: 'invalid-song-cursor' })
 })
 
 test('only one active render is admitted and cancel prevents a late provider response from publishing a song', async t => {

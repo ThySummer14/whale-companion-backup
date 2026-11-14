@@ -9,7 +9,7 @@ import test from 'node:test'
 import { CompanionStore } from '../src/core/store.ts'
 import { registerHttp } from '../src/host/http.ts'
 import { SingingService, SINGING_CHAT_COVER_ID_PREFIX } from '../src/host/singing.ts'
-import { mixSongWav, parseSongWav, songVocalEnvelope } from '../src/host/song-mix.ts'
+import { allocateSongWav, mixSongWav, normalizeSongPeak, parseSongWav, songVocalEnvelope } from '../src/host/song-mix.ts'
 import { MAX_SINGING_WAV_BYTES } from '../src/protocol/singing.ts'
 
 function wave(rate, channels, frames, sample) {
@@ -31,6 +31,17 @@ function wave(rate, channels, frames, sample) {
     for (let channel = 0; channel < channels; channel++) wav.writeInt16LE(sample(frame, channel), 44 + (frame * channels + channel) * 2)
   }
   return wav
+}
+
+const peakNormalized = (buf) => {
+  const pcm = parseSongWav(buf).pcm
+  let peak = 0
+  for (let i = 0; i < pcm.length; i += 2) peak = Math.max(peak, Math.abs(pcm.readInt16LE(i)))
+  const target = Math.round(32767 * 10 ** (-1.5 / 20))
+  const out = Buffer.from(buf)
+  const view = parseSongWav(out).pcm
+  for (let i = 0; i < view.length; i += 2) view.writeInt16LE(Math.round(view.readInt16LE(i) * target / peak), i)
+  return out
 }
 
 test('mix aligns starts, interpolates the backing sample clock and pads short stereo backing', async () => {
@@ -180,8 +191,9 @@ test('single-source cover progresses through separation and conversion before ar
   assert.equal(singing.view().tasks[0].coverEngine, 'applio-rvc')
   const audio = await singing.audio(id, undefined, true)
   const mixed = parseSongWav(Buffer.from(audio.data))
-  assert.equal(mixed.pcm.readInt16LE(0), 2000)
-  assert.equal(mixed.pcm.readInt16LE(8000 * 4), 6000)
+  const loud = Math.round(32767 * 10 ** (-1.5 / 20))
+  assert.equal(mixed.pcm.readInt16LE(0), Math.round(2000 * loud / 6000))
+  assert.equal(mixed.pcm.readInt16LE(8000 * 4), loud)
   assert.equal(audio.vocalEnvelope[0], 0)
   assert.ok(audio.vocalEnvelope[20] > 0)
   const receipt = store.activities().find(item => item.kind === 'song.archived')
@@ -335,8 +347,8 @@ test('verified mixed WAV retains a compact envelope from converted vocal only', 
   const stage = await singing.audio(task.id, undefined, true)
   assert.equal(archive.vocalEnvelope, undefined)
   assert.ok(stage.vocalEnvelope instanceof Uint8Array)
-  assert.deepEqual(Buffer.from(stage.data), await mixSongWav(parseSongWav(converted),
-    parseSongWav(accompaniment), -2, -10, new AbortController().signal))
+  assert.deepEqual(Buffer.from(stage.data), peakNormalized(await mixSongWav(parseSongWav(converted),
+    parseSongWav(accompaniment), -2, -10, new AbortController().signal)))
   assert.notEqual(parseSongWav(Buffer.from(stage.data)).pcm.readInt16LE(0), 0)
   assert.deepEqual([...stage.vocalEnvelope], [...Array(40).fill(0), ...Array(40).fill(159), ...Array(41).fill(0)])
   assert.equal(store.activities().find(item => item.kind === 'song.archived').data.vocalEnvelopeSamples, 121)
@@ -441,10 +453,28 @@ test('owner multipart cover validates all parts and archives only a successful m
   const archived = parseSongWav(Buffer.from((await singing.audio(task.id)).data))
   assert.equal(archived.frames, 48_000)
   assert.equal(archived.channels, 2)
-  assert.equal(archived.pcm.readInt16LE(0), Math.round(1000 * 10 ** (-2 / 20) + 500 * 10 ** (-10 / 20)))
-  assert.equal(archived.pcm.readInt16LE(47_999 * 4), Math.round(1000 * 10 ** (-2 / 20)))
+  const target = Math.round(32767 * 10 ** (-1.5 / 20))
+  let peak = 0
+  for (let i = 0; i < archived.pcm.length; i += 2) peak = Math.max(peak, Math.abs(archived.pcm.readInt16LE(i)))
+  assert.equal(peak, target)
+  const first = archived.pcm.readInt16LE(0)
+  const last = archived.pcm.readInt16LE(47_999 * 4)
+  assert.ok(Math.abs(first / last - (1000 * 10 ** (-2 / 20) + 500 * 10 ** (-10 / 20)) / (1000 * 10 ** (-2 / 20))) < 0.01)
   const receipt = store.activities().find(item => item.kind === 'song.archived')
   assert.equal(receipt.data.mode, 'cover')
   assert.equal(receipt.data.backingMixed, true)
   assert.equal(receipt.data.durationSeconds, 3)
+})
+
+test('archive normalization lifts quiet mixes to -1.5 dBFS peak without touching silence', () => {
+  const wav = allocateSongWav(16_000, 1, 1600)
+  for (let i = 0; i < 1600; i++) wav.writeInt16LE(i < 800 ? 3000 : 0, 44 + i * 2)
+  const out = normalizeSongPeak(wav)
+  const target = Math.round(32767 * 10 ** (-1.5 / 20))
+  let peak = 0
+  for (let i = 0; i < 1600; i++) peak = Math.max(peak, Math.abs(out.readInt16LE(44 + i * 2)))
+  assert.equal(peak, target)
+  assert.equal(out.readInt16LE(44 + 900 * 2), 0)
+  const silent = allocateSongWav(16_000, 1, 100)
+  assert.deepEqual(normalizeSongPeak(silent), silent)
 })
