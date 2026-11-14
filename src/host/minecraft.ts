@@ -1897,14 +1897,14 @@ export class MinecraftService {
   }
 
   async teleport(input: { x: number; y: number; z: number }, signal?: AbortSignal): Promise<unknown> {
-    const result = await this.request('/api/teleport', 'POST', input, signal)
+    const result = await this.request('/teleport', 'POST', input, signal)
     this.store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft', kind: 'world.teleport',
       summary: '按主人要求传送到大肥鱼指定坐标', status: 'success', data: { target: input } })
     return result
   }
 
   async setGameMode(mode: 'creative' | 'survival', signal?: AbortSignal): Promise<unknown> {
-    return this.request('/api/gamemode', 'POST', { mode }, signal)
+    return this.request('/gamemode', 'POST', { mode }, signal)
   }
 
   markCreativeForBuild(): void {
