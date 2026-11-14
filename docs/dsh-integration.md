@@ -2138,3 +2138,9 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 设备路由：`GET music/plugins`、`GET music/plugins/:id/home|search`、`GET music/plugins/:id/stream/:trackId`；stream 结果 `companion://singing/<id>` 由设备鉴权后流式归档音频，`file://` 限制在插件目录内（路径穿越拒绝），其余 https URL 原样返回给客户端。
 - 自带 `plugins/dafeiyu` 源插件：home/search/stream 映射 Companion 歌唱归档为 MyGo 曲目形状（artists/album/duration ms），音频仍走设备鉴权。歌词下发待归档携带 lyrics 后接入（当前覆盖任务不存歌词）。
 - 5 项运行时/源插件测试（含网络白名单拒绝、路径穿越拒绝、坏插件跳过、storage 持久化）+ 混音回归全绿；`pnpm typecheck` 通过。App 音乐页的插件源切换 UI 列为下一步。
+
+## 158. Companion 0.128.0 App 音乐页插件源切换
+
+- 音乐页新增源 chips（归档 / 各已加载插件，如「大肥鱼翻唱」「Demo」），浅色跟随 App 主题；选中插件源后列表来自 `music/plugins/:id/search`，播放经 `music/plugins/:id/stream/:trackId` 鉴权下载（`SongArchiveItem.pluginId` 标记；bytes 未知时以响应 contentLength 为准并受 `_maxSongBytes` 封顶，仍校验 RIFF/WAVE 与实收字节）。
+- 新增 2 项测试（源切换渲染与回切、插件流路由下载字节一致），whale 全套 145 过 + 1 跳过；模拟器端到端：切「大肥鱼翻唱」→ 播放归档翻唱 → Now Playing 舞台正常播放（截图 `.work/app-preview/music-plugin-source.png` / `music-plugin-nowplaying.png`）。验收后模拟器已停止以释放内存。
+- Demo 插件的 mp3 流暂不支持 App 内播放（下载校验仅接受 WAV），dafeiyu 源为 WAV 不受影响；如需 mp3 源后续扩展校验与原生播放格式。
