@@ -1,0 +1,10 @@
+{
+  "id": "dafeiyu",
+  "name": "大肥鱼翻唱",
+  "version": "1.0.0",
+  "main": "index.js",
+  "playback": "stream",
+  "permissions": {},
+  "settings": [],
+  "navigation": [{ "builtin": "home" }]
+}

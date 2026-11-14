@@ -1,9 +1,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createReadStream } from 'node:fs'
+import { createReadStream, statSync } from 'node:fs'
 import { z } from 'zod'
-import { BILIBILI_CLIP_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_RECOVERY_CONTEXT, MINECRAFT_SHARE_CONTEXT, type ActivityRecord } from '../core/model.ts'
+import { BILIBILI_CLIP_CONTEXT, BILIBILI_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_RECOVERY_CONTEXT, MINECRAFT_SHARE_CONTEXT, type ActivityRecord } from '../core/model.ts'
 import { HOUSE_COMPLETION_TASK_PREFIX } from '../core/minecraft-house-verification.ts'
+import { minecraftHouseMaterials } from '../core/minecraft-house.ts'
+import { exportLitematica } from '../core/litematica.ts'
 import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SUPPLY_EVENT, PROJECT_MAX_SECTIONS } from '../core/minecraft-house-project.ts'
 import { MINECRAFT_PLACE_EVENT } from '../core/minecraft-place.ts'
 import { isFeedReplyContext } from '../core/feed-reply.ts'
@@ -11,6 +13,7 @@ import type { WorkbenchView } from '../protocol/api.ts'
 import { streamAudio } from './audio.ts'
 import { ContextInput, DeviceFeedPublishInput, FeedReplyInput, MessageInput, SessionCreateInput, TtsInput, TtsRenderInput, capabilityId, identifier } from './api-schemas.ts'
 import { DeviceAuthError, type DeviceService } from './devices.ts'
+import { resolvePluginFile } from './music-plugins.ts'
 import type { DeviceAvatarViewer } from './device-avatar-http.ts'
 import type { CompanionRuntime } from './runtime.ts'
 import { managementAllowed } from './security.ts'
@@ -20,6 +23,7 @@ import { MAX_ASR_WAV_BYTES } from './asr.ts'
 import { MAX_CHAT_ATTACHMENTS, MAX_CHAT_ATTACHMENT_BASE64, MAX_CHAT_ATTACHMENT_BODY, MAX_CHAT_ATTACHMENT_BYTES } from './chat-attachments.ts'
 import { deviceFeedPost } from './device-feed.ts'
 import { MAX_DEVICE_IMAGE_BASE64, MAX_DEVICE_IMAGE_BYTES } from './device-media.ts'
+import { QwenWatchInput } from './qwen-watch.ts'
 
 const DevicePostInput = FeedReplyInput.extend({
   body: z.string().trim().max(4000).default(''),
@@ -39,8 +43,22 @@ const DeviceMessageInput = MessageInput.extend({
 }).refine(input => !!(input.text || input.attachments?.length) && (!input.expectedSessionId || !!input.requestId))
 const ChatAttachmentQuery = z.strictObject({ contextId: capabilityId, messageId: identifier, attachmentId: identifier })
 const NoticeId = z.int().positive()
-const NoticeReadInput = z.union([z.strictObject({ id: NoticeId }), z.strictObject({ through: NoticeId })])
+const NoticeReadInput = z.union([z.strictObject({ id: NoticeId }), z.strictObject({ through: NoticeId }),
+  z.strictObject({ ids: z.array(NoticeId).min(1).max(50) })])
 const MAX_NOTICE_READ_BODY = 1024
+const HouseApprovalInput = z.strictObject({ zoneId: z.uuid(), revision: z.int().nonnegative() })
+
+function houseApprovals(runtime: CompanionRuntime) {
+  const drafts = runtime.store.minecraftHouses.listForApprovals()
+  const pending = drafts.filter(draft => draft.status === 'draft')
+  const zones = pending.length ? runtime.store.buildZones().filter(zone => pending.some(draft => !draft.zoneId || draft.zoneId === zone.id)) : []
+  return {
+    version: 1,
+    items: drafts.map(({ id, name, zoneId, revision, status, assumptions, layout }) =>
+      ({ id, name, zoneId, revision: revision ?? 0, status, assumptions, layout, materials: minecraftHouseMaterials(layout) })),
+    zones: zones.map(({ id, name, dimension, x, y, z }) => ({ id, name, dimension, x, y, z })),
+  }
+}
 
 export function deviceContextAllowed(contextId: string | undefined): boolean {
   return !isFeedReplyContext(contextId) && contextId !== BILIBILI_REFLECTION_CONTEXT && contextId !== BILIBILI_SHARE_CONTEXT && contextId !== BILIBILI_CLIP_CONTEXT &&
@@ -171,8 +189,10 @@ function noticeListQuery(params: URLSearchParams): { before?: number; limit?: nu
 
 function parseNoticeRead(text: string): z.infer<typeof NoticeReadInput> {
   const input = NoticeReadInput.parse(parseJson(text))
-  // The envelope contains exactly one integer. A comma here means JSON.parse collapsed duplicate keys.
-  if (text.includes(',')) throw new DeviceAuthError(400, 'invalid-request')
+  // Commas are only valid between IDs in a grouped acknowledgement.
+  if ((text.match(/,/gu)?.length ?? 0) !== ('ids' in input ? input.ids.length - 1 : 0)) {
+    throw new DeviceAuthError(400, 'invalid-request')
+  }
   return input
 }
 
@@ -280,9 +300,94 @@ export function registerDeviceHttp(ctx: Context, runtime: CompanionRuntime, devi
             json(res, 200, { ...view, project: runtime.autonomy.campProjectSummary(), patrol: runtime.autonomy.campPatrolSummary(), gather: runtime.autonomy.campGatherSummary() })
             return
           }
-          if (method === 'GET' && path === 'singing') {
+          if (method === 'POST' && path === 'bilibili/watch') {
             if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
-            json(res, 200, runtime.singing.archive())
+            const input = QwenWatchInput.parse(await body(req, 8192))
+            devices.authenticate(req)
+            const { target, ...result } = await whileConnected(res, signal => runtime.qwenWatch.reply(device.id, input, runtime.store.persona(),
+              signal, () => { devices.authenticate(req) }))
+            if (target) runtime.store.recordActivity({ contextId: BILIBILI_CONTEXT, source: 'media.bilibili', kind: 'video.watched',
+              summary: '一起看 B 站片段', status: 'success', data: { ...target } })
+            if (!res.destroyed) json(res, 200, result)
+            return
+          }
+          const houseAction = /^minecraft\/approvals\/([\da-f-]+)\/(preview|build)$/u.exec(path)
+          const houseProjection = /^minecraft\/approvals\/([\da-f-]+)\/projection$/u.exec(path)
+          if (method === 'GET' && houseProjection) {
+            const { revision } = z.strictObject({ revision: z.string().regex(/^\d{1,15}$/u).transform(Number) })
+              .parse(Object.fromEntries(url.searchParams))
+            if (url.searchParams.size !== 1) throw new DeviceAuthError(400, 'invalid-request')
+            const draft = runtime.store.minecraftHouses.get(z.uuid().parse(houseProjection[1]))
+            if (!draft || (draft.revision ?? 0) !== revision) throw new DeviceAuthError(409, 'minecraft-house-revision-stale')
+            const bytes = exportLitematica(draft.layout, draft.name)
+            res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': bytes.length,
+              'content-disposition': `attachment; filename="house-${draft.id}-r${revision}.litematic"`, 'cache-control': 'private, no-store' })
+            res.end(bytes)
+            return
+          }
+          if (method === 'POST' && houseAction) {
+            if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
+            const id = z.uuid().parse(houseAction[1])
+            if (houseAction[2] === 'preview') {
+              const { zoneId, revision } = HouseApprovalInput.parse(await body(req, 1024))
+              devices.authenticate(req)
+              const preview = await whileConnected(res, signal => runtime.minecraft.previewHouse(id, zoneId, signal, revision))
+              devices.authenticate(req)
+              if (!res.destroyed) json(res, 200, preview)
+            } else {
+              const { zoneId, revision, previewId } = HouseApprovalInput.extend({ previewId: z.uuid() }).parse(await body(req, 1024))
+              devices.authenticate(req)
+              const draft = runtime.store.minecraftHouses.get(id)
+              if (!draft || (draft.revision ?? 0) !== revision) throw new DeviceAuthError(409, 'minecraft-house-revision-stale')
+              const result = await runtime.minecraft.buildHouse(id, zoneId, previewId, undefined, () => devices.authenticate(req))
+              if (!res.destroyed) json(res, 200, { id, status: result.status })
+            }
+            return
+          }
+          if (method === 'GET' && path === 'singing') {
+            if (url.searchParams.size > 1 || url.searchParams.size && !url.searchParams.has('cursor')) {
+              throw new DeviceAuthError(400, 'invalid-request')
+            }
+            json(res, 200, runtime.singing.archive(url.searchParams.get('cursor') ?? undefined))
+            return
+          }
+          if (method === 'GET' && path === 'music/plugins') {
+            json(res, 200, { items: runtime.musicPlugins?.list() ?? [] })
+            return
+          }
+          const pluginPage = /^music\/plugins\/([a-z0-9-]{1,64})\/(home|search)$/u.exec(path)
+          if (method === 'GET' && pluginPage) {
+            if (!runtime.musicPlugins) throw new DeviceAuthError(404, 'music-plugin-not-found')
+            const params = pluginPage[2] === 'search'
+              ? { query: url.searchParams.get('query') ?? '', kind: url.searchParams.get('kind') ?? 'tracks', offset: Number(url.searchParams.get('offset') ?? 0) }
+              : {}
+            json(res, 200, await runtime.musicPlugins.call(pluginPage[1]!, pluginPage[2]!, params))
+            return
+          }
+          const pluginStream = /^music\/plugins\/([a-z0-9-]{1,64})\/stream\/([A-Za-z0-9_-]{1,120})$/u.exec(path)
+          if (method === 'GET' && pluginStream) {
+            if (!runtime.musicPlugins) throw new DeviceAuthError(404, 'music-plugin-not-found')
+            const result = await runtime.musicPlugins.call(pluginStream[1]!, 'stream', { id: pluginStream[2]! }) as { url?: string; type?: string }
+            const target = result?.url ?? ''
+            if (target.startsWith('companion://singing/')) {
+              const audio = await runtime.singing.audio(target.slice('companion://singing/'.length))
+              streamAudio(req, res, audio, playbackHeaders('singing'))
+              return
+            }
+            if (target.startsWith('file://')) {
+              const filePath = resolvePluginFile(runtime.musicPlugins.pluginDir(pluginStream[1]!), target)
+              const size = statSync(filePath).size
+              res.writeHead(200, {
+                'content-type': result?.type === 'mp3' ? 'audio/mpeg' : 'audio/wav',
+                'content-length': size,
+                ...playbackHeaders('singing'),
+              })
+              const file = createReadStream(filePath)
+              req.once('close', () => file.destroy())
+              file.pipe(res)
+              return
+            }
+            json(res, 200, { url: target, type: result?.type })
             return
           }
           const songMatch = /^singing\/([^/]+)\/audio$/u.exec(path)
@@ -409,7 +514,9 @@ export function registerDeviceHttp(ctx: Context, runtime: CompanionRuntime, devi
             const view = deviceState(runtime.view())
             const notices = runtime.store.notices.summary(current.id)
             if (!notices) throw new DeviceAuthError(401, 'device-unauthorized')
-            json(res, 200, { ...view, notices, chatSend: { version: 1 }, ...(avatarCapability && { avatarViewer: avatarCapability }) })
+            json(res, 200, { ...view, notices, houseApprovals: houseApprovals(runtime),
+              bilibiliWatch: { version: 1, ready: runtime.qwenWatch?.ready === true }, noticeGroups: 1, chatSend: { version: 1 },
+              ...(avatarCapability && { avatarViewer: avatarCapability }) })
             return
           }
           if (method === 'GET' && path === 'notices') {
@@ -427,7 +534,7 @@ export function registerDeviceHttp(ctx: Context, runtime: CompanionRuntime, devi
             const payload = await readBody(req, MAX_NOTICE_READ_BODY)
             const current = devices.authenticate(req)
             const input = parseNoticeRead(payload)
-            const summary = runtime.store.notices.markRead(current.id, input)
+            const summary = 'ids' in input ? runtime.store.notices.markGroupRead(current.id, input.ids) : runtime.store.notices.markRead(current.id, input)
             if (!summary) throw new DeviceAuthError(404, 'notice-not-found')
             json(res, 200, summary)
             return

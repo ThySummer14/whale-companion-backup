@@ -2130,3 +2130,11 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 音乐页曲库改回跟随 App 自身浅色主题（移除强加的暗色 wrapper），保留 MyGo 布局（胶囊搜索、封面行、迷你播放器）；Now Playing 沉浸舞台按 MyGo 设计在两种主题下均为暗色，保持不变。UI 以测试渲染捕获验收（`.work/music-preview/`），期间模拟器保持停止以控制本机内存。
 - 内存注意：本机与 mini 均曾接近内存上限；模拟器（qemu 约 5.5GB）已停止，mini 最大常驻为 Minecraft 服务端 4G 堆。后续真机/模拟器验收前先确认空闲内存。
 - 正式机复跑《空城计》源翻唱（任务 `d630c5c5`）实测：新归档 RMS -16.7 dBFS、peak -1.5 dBFS（旧归档 -24.8 / -9.3），响度问题修复确认。
+
+## 157. Companion 0.128.0 MyGo 兼容插件运行时与大肥鱼翻唱源
+
+- 宿主侧新增 `MusicPluginService`（node:vm 沙箱）加载 MyGo 兼容插件目录（默认 `~/.local/share/companion/music-plugins`，`musicPluginsDir` 可覆盖）：解析 `plugin.json`（id/name/version/main/playback/permissions.network/settings），把 ESM `export function/const` 转换为沙箱内导出；坏插件跳过不影响其余。
+- 宿主桥接子集：`host.storage`（插件目录内 0600 JSON）、`host.setting`、`host.dir`、`host.fetch`（仅 https 且命中 permissions.network 白名单）、`host.companion`（只读白名单：`singing` 归档与单曲元数据）；`openURL/waitForRedirect` 明确不支持。与 MyGo 的差异：插件跑在宿主沙箱而非 App 内，凭据不下发给插件 JS。
+- 设备路由：`GET music/plugins`、`GET music/plugins/:id/home|search`、`GET music/plugins/:id/stream/:trackId`；stream 结果 `companion://singing/<id>` 由设备鉴权后流式归档音频，`file://` 限制在插件目录内（路径穿越拒绝），其余 https URL 原样返回给客户端。
+- 自带 `plugins/dafeiyu` 源插件：home/search/stream 映射 Companion 歌唱归档为 MyGo 曲目形状（artists/album/duration ms），音频仍走设备鉴权。歌词下发待归档携带 lyrics 后接入（当前覆盖任务不存歌词）。
+- 5 项运行时/源插件测试（含网络白名单拒绝、路径穿越拒绝、坏插件跳过、storage 持久化）+ 混音回归全绿；`pnpm typecheck` 通过。App 音乐页的插件源切换 UI 列为下一步。

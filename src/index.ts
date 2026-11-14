@@ -31,6 +31,8 @@ import { registerBilibiliChoiceBudget, registerFeedReplyBudget } from './host/bi
 import { RealtimePcmProvider, type RealtimePcmOptions } from './host/realtime-pcm.ts'
 import { LocalAsrProvider } from './host/asr.ts'
 import { DeepSeekAsrProvider } from './host/asr-deepseek.ts'
+import { DeviceAuthError } from './host/devices.ts'
+import { MusicPluginService } from './host/music-plugins.ts'
 import { AceStepSingingProvider } from './host/singing-provider.ts'
 import { ApplioRvcCoverProvider, SeedVcCoverProvider } from './host/singing-cover.ts'
 import { MlxDemucsSeparator } from './host/singing-separation.ts'
@@ -64,6 +66,7 @@ export const Config = s.object({
   asrTimeoutMs: s.number().min(1000).max(60_000).step(1).default(15_000).description('Maximum milliseconds for a device recording upload and transcription.'),
   bilibiliFfmpegPath: s.string().default('').description('Absolute FFmpeg executable for Bilibili clip sampling. Empty uses ffmpeg on PATH.'),
   singingApiOrigin: s.string().default('').description('Local ACE-Step 1.5 HTTP origin, such as http://127.0.0.1:8001. Empty disables song generation.'),
+  musicPluginsDir: s.string().default('').description('Directory of MyGo-compatible music plugins. Empty uses the Companion music-plugins directory.'),
   singingTimeoutMs: s.number().min(15_000).max(300_000).step(1).default(180_000).description('Maximum milliseconds for a song generation and download.'),
   singingCoverEngine: s.union(['seed-vc', 'applio-rvc']).default('seed-vc').description('Local converter for singing covers.'),
   seedVcPythonPath: s.string().default('').description('Absolute path to the prepared Seed-VC Python executable.'),
@@ -184,6 +187,14 @@ export function apply(ctx: Context, config: CompanionConfig): void {
     workerPort: config.minecraftWorkerPort, gamePort: config.minecraftGamePort, consoleFifo: config.minecraftConsoleFifo, offline: config.minecraftOffline, voiceDir: config.minecraftVoiceDir,
   }, config.bilibiliFfmpegPath || 'ffmpeg', config.minecraftOvoRoot)
   const devices = new DeviceService(ctx, store, id => runtime.devicePlayback.revoke(id))
+  runtime.musicPlugins = new MusicPluginService(config.musicPluginsDir || join(homedir(), '.local', 'share', 'companion', 'music-plugins'), async path => {
+    if (path === 'singing') return runtime.singing.archive()
+    const track = /^singing\/([0-9a-f-]{36})$/u.exec(path)
+    const item = track ? runtime.singing.archive().items.find(entry => entry.id === track[1]) : undefined
+    if (!item) throw new DeviceAuthError(404, 'music-plugin-companion-not-found')
+    return item
+  })
+  runtime.musicPlugins.start()
   runtime.attachEvents(new EventHub(ctx, store))
   runtime.attachEvents(new EventHub(ctx, store, {
     path: '/companion-device/api/events',
