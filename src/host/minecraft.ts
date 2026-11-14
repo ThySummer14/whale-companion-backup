@@ -1912,7 +1912,8 @@ export class MinecraftService {
   }
 
   creativeBuildAllowed(): boolean {
-    return !!this.houseRun || this.store.minecraftHouses.list().some(draft => draft.zoneId !== null && draft.status !== 'built')
+    return !!this.houseRun || this.store.minecraftHouses.list().some(draft => draft.zoneId !== null && draft.status !== 'built') ||
+      this.store.minecraftHouseProjects.list().some(project => project.zoneId !== null && project.sections.some(section => section.status !== 'built'))
   }
 
   async buildHouse(id: string, zoneId: string, previewId: string, callerSignal?: AbortSignal, assertAuthorized?: () => void): Promise<MinecraftHouseDraft> {
