@@ -2115,3 +2115,11 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - 测试：新增 `music_stage_test.dart` 3 项（队列点播/面板切换、shuffle 保持当前首置 + repeat 三态、LRC 解析与活跃行），`songs_test.dart` 改指新舞台并保持原行为断言；whale 全套 143 过 + 1 跳过。`WHALE_MUSIC_PREVIEW_DIR` 渲染捕获见 `.work/music-preview/`。
 - 模拟器实测：暗色曲库与空态正确（正式 mini 歌唱归档当前为空，她唱完归档后才会列歌）；带数据舞台见渲染捕获。未验：真机听感与触控手感。
 - App 改动位于 `apps/dsh-go` 子仓库，按该仓库协作规则未提交；宿主 bundle 无变更，不需要 redeploy。
+
+## 155. Companion 0.128.0 正式机歌唱链路跑通与音乐页真实歌单
+
+- 正式 Mac mini 首次跑通源翻唱：`POST /companion/api/singing/source-covers` 上传授权音源（JaCRC 田昊《空城计》16.8s）→ MLX Demucs 分离 → Applio RVC（肥鱼 v1 权重，RVC v2/40kHz/F0）换声 → 混音 → 归档。任务 `019213fb` succeeded，归档 18.04 秒；音乐页出现第一首真实歌「空城计（大肥鱼翻唱）」并可播放（模拟器截图 `.work/app-preview/music-library-real.png`）。
+- 配置：`singingCoverEngine=applio-rvc` + `rvcPythonPath/rvcApplioDir/rvcModelPath/rvcIndexPath` + `coverSeparatorPythonPath/coverSeparatorCacheDir`，资产位于 `~/.local/share/companion/singing/`（Applio 固定版 `6d5d9511`、肥鱼权重/index、htdemucs 缓存、授权音源），自本机 `.work/feiyu-rvc-0.49.*` 与 `.work/song-cover-0.43` 迁移。
+- 环境偏差（如实记录）：mini 无 brew/Python 3.12，改用 npmmirror 的 python-build-standalone 3.12.16（与测试同大版本），依赖 pins 保持 Applio 原样；mini 外网带宽慢导致在线 pip 卡死/极慢，改为本机清华源下载 115 个 wheel（449MB）经 Tailscale 传输后 `--no-index` 离线安装；openrsync 目录语义造成 demucs 缓存嵌套一层，已修正并校验关键文件路径。torch 2.11.0 MPS 可用、demucs-mlx 1.6.1 自检通过。
+- 音乐页主题修复：曲库整页改用统一暗色 theme 对象（此前搜索框/专辑标题误用外层浅色 theme，暗底上出现白底搜索框与深色标题）。
+- 未验：真机听感（翻唱音色主观验收）；长按/队列等触控手感；SoulX 按谱合成仍未在正式机配置（独立推进）。
