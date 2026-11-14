@@ -15,7 +15,7 @@ import { deviceActivity, deviceContextAllowed, registerDeviceHttp } from './host
 import { EventHub } from './host/events.ts'
 import { registerHttp } from './host/http.ts'
 import { registerMemoryTools } from './host/memory-tools.ts'
-import { registerChatCapabilities } from './host/chat-capabilities.ts'
+import { registerChatCapabilities, registerMobileChatEffort } from './host/chat-capabilities.ts'
 import { registerFeedTools } from './host/feed-tools.ts'
 import { CompanionRuntime } from './host/runtime.ts'
 import { registerAvatarHttp } from './host/avatar-http.ts'
@@ -41,7 +41,7 @@ export const inject = ['agents', 'webServer', 'tools', 'sessionPersistence', 'se
 export const Config = s.object({
   dataDir: s.string().default('').description('Companion data directory. Empty uses $DSH_HOME/companion.'),
   activityRetention: s.number().min(100).max(100_000).step(1).default(10_000).description('Maximum retained Companion activity rows.'),
-  ttsProvider: s.string().default('gpt-sovits').description('Speech provider: gpt-sovits or legacy piper.'),
+  ttsProvider: s.string().default('deepseek').description('Speech provider: deepseek cloud, gpt-sovits or legacy piper.'),
   ttsEndpoint: s.string().default('http://127.0.0.1:9881/').description('Loopback GPT-SoVITS API endpoint.'),
   ttsReferenceAudio: s.string().default('').description('Absolute path to the fixed whale reference WAV.'),
   ttsReferenceText: s.string().default('听好啦，这不是胡话，这是尾鳍拍碎镜子以后，每一块碎片都学会游泳的抽象报告。').description('Transcript of the fixed reference audio.'),
@@ -88,6 +88,7 @@ export const Config = s.object({
   minecraftGamePort: s.number().min(1).max(65_535).step(1).default(25565).description('Loopback port reported for the local Minecraft server.'),
   minecraftOwner: s.string().default('thyysummer').description('The owner player that the companion may follow. The bot is a separate Carpet fake player.'),
   minecraftWardrobeFile: s.string().default('').description('Optional absolute path to a private allowlist of YSM model choices for the companion.'),
+  minecraftVoiceDir: s.string().default('').description('Optional private local directory shared with the Minecraft voice relay.'),
   minecraftOvoRoot: s.string().default('').description('Optional absolute path to the local DeepseekOVO skill library for the account-backed worker.'),
   minecraftOffline: s.boolean().default(false).description('Local test servers only: use the dafeiyu offline identity with OVO on a loopback address. Never enable for Coopcraft.'),
 })
@@ -97,8 +98,8 @@ const packageJson = createRequire(import.meta.url)('../package.json') as { versi
 
 export function apply(ctx: Context, config: CompanionConfig): void {
   if (config.dataDir && !isAbsolute(config.dataDir)) throw new Error('Companion dataDir must be absolute or empty')
-  if (config.ttsProvider !== 'piper' && config.ttsProvider !== 'gpt-sovits') throw new Error('Unsupported Companion TTS provider')
-  for (const path of [config.ttsPythonPath, config.ttsModelPath, config.ttsReferenceAudio, config.ttsExpressivePythonPath, config.ttsExpressiveModelDir, config.avatarDir, config.minecraftServerRoot, config.minecraftConsoleFifo, config.bilibiliFfmpegPath, config.minecraftOvoRoot]) if (path && !isAbsolute(path)) throw new Error('Companion executable and asset paths must be absolute or empty')
+  if (config.ttsProvider !== 'piper' && config.ttsProvider !== 'gpt-sovits' && config.ttsProvider !== 'deepseek') throw new Error('Unsupported Companion TTS provider')
+  for (const path of [config.ttsPythonPath, config.ttsModelPath, config.ttsReferenceAudio, config.ttsExpressivePythonPath, config.ttsExpressiveModelDir, config.avatarDir, config.minecraftServerRoot, config.minecraftConsoleFifo, config.minecraftVoiceDir, config.bilibiliFfmpegPath, config.minecraftOvoRoot]) if (path && !isAbsolute(path)) throw new Error('Companion executable and asset paths must be absolute or empty')
   if (Boolean(config.ttsExpressivePythonPath) !== Boolean(config.ttsExpressiveModelDir)) throw new Error('Expressive TTS requires both Python and model paths')
   const dataDir = config.dataDir || join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'companion')
   const ttsDir = join(homedir(), '.local', 'share', 'companion', 'tts')
@@ -167,8 +168,12 @@ export function apply(ctx: Context, config: CompanionConfig): void {
       referenceLanguage: config.ttsReferenceLanguage,
       timeoutMs: config.ttsTimeoutMs,
     },
+    deepseek: {
+      apiKey: process.env.DEEPSEEK_API_KEY?.trim() ?? '',
+      timeoutMs: config.ttsTimeoutMs,
+    },
   }, join(dataDir, 'media'), dataDir, config.avatarDir || join(homedir(), '.local', 'share', 'companion', 'avatar'), config.minecraftServerRoot || join(homedir(), '工作', '会话', 'coopcraft', 'server'), config.minecraftOwner, realtimePcm, asr, singing, cover, separator, score, config.minecraftWardrobeFile, {
-    workerPort: config.minecraftWorkerPort, gamePort: config.minecraftGamePort, consoleFifo: config.minecraftConsoleFifo, offline: config.minecraftOffline,
+    workerPort: config.minecraftWorkerPort, gamePort: config.minecraftGamePort, consoleFifo: config.minecraftConsoleFifo, offline: config.minecraftOffline, voiceDir: config.minecraftVoiceDir,
   }, config.bilibiliFfmpegPath || 'ffmpeg', config.minecraftOvoRoot)
   const devices = new DeviceService(ctx, store, id => runtime.devicePlayback.revoke(id))
   runtime.attachEvents(new EventHub(ctx, store))
@@ -210,6 +215,7 @@ export function apply(ctx: Context, config: CompanionConfig): void {
   ctx.effect(() => registerBilibiliChoiceBudget(ctx, store))
   ctx.effect(() => registerFeedReplyBudget(ctx, store))
   ctx.effect(() => registerChatCapabilities(ctx, store, runtime.minecraft))
+  ctx.effect(() => registerMobileChatEffort(ctx, store))
   ctx.effect(() => () => devices.close())
   ctx.effect(() => () => runtime.close())
   ctx.effect(() => registerHttp(ctx, runtime))

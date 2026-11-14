@@ -11,14 +11,16 @@ import { EXPRESSIVE_TTS_MAX_CHARS, EXPRESSIVE_TTS_STYLES, type ExpressiveTtsStyl
 import type { SessionService } from './session.ts'
 import { DeviceAuthError } from './devices.ts'
 import { GptSovitsProvider, type GptSovitsOptions } from './tts-provider.ts'
+import { DeepSeekTtsProvider, type DeepSeekTtsOptions } from './tts-deepseek.ts'
 
 export interface TtsOptions {
-  provider: 'piper' | 'gpt-sovits'
+  provider: 'piper' | 'gpt-sovits' | 'deepseek'
   pythonPath: string
   modelPath: string
   mediaDir: string
   timeoutMs: number
   gpt?: GptSovitsOptions
+  deepseek?: DeepSeekTtsOptions
   expressive?: { pythonPath: string; modelDir: string; timeoutMs: number }
 }
 
@@ -41,6 +43,7 @@ export class TtsService {
   private readonly voice: string
   private readonly workerPath = fileURLToPath(new URL('./tts-worker.py', import.meta.url))
   private readonly gpt?: GptSovitsProvider
+  private readonly deepseek?: DeepSeekTtsProvider
   private available = false
   private closing = false
   private draining = false
@@ -49,17 +52,27 @@ export class TtsService {
   private probing?: Promise<boolean>
 
   constructor(private readonly store: CompanionStore, private readonly sessions: SessionService, private readonly options: TtsOptions) {
-    this.voice = options.provider === 'gpt-sovits' ? 'deepseek-whale-v5turbo' : basename(options.modelPath, '.onnx')
+    this.voice = options.provider === 'gpt-sovits' ? 'deepseek-whale-v5turbo'
+      : options.provider === 'deepseek' ? 'deepseek-stella' : basename(options.modelPath, '.onnx')
     if (options.provider === 'gpt-sovits') {
       if (!options.gpt) throw new Error('GPT-SoVITS provider configuration is required')
       this.gpt = new GptSovitsProvider(options.gpt)
+    }
+    if (options.provider === 'deepseek') {
+      if (!options.deepseek) throw new Error('DeepSeek TTS provider configuration is required')
+      this.deepseek = new DeepSeekTtsProvider(options.deepseek)
     }
   }
 
   start(): void {
     mkdirSync(this.options.mediaDir, { recursive: true, mode: 0o700 })
     chmodSync(this.options.mediaDir, 0o700)
-    if (this.gpt) {
+    if (this.deepseek) {
+      this.available = this.deepseek.configured()
+      this.store.updateCapability('media.tts', this.available ? 'ready' : 'unavailable', this.available
+        ? 'DeepSeek 云端 TTS · stella 官方音色'
+        : '缺少 DEEPSEEK_API_KEY，云端语音不可用')
+    } else if (this.gpt) {
       this.store.updateCapability('media.tts', 'unavailable', '正在连接本地 GPT-SoVITS 服务')
       void this.checkProvider()
     } else {
@@ -74,6 +87,15 @@ export class TtsService {
   }
 
   private checkProvider(): Promise<boolean> {
+    if (this.deepseek) {
+      this.available = this.deepseek.configured()
+      if (!this.closing) {
+        this.store.updateCapability('media.tts', this.available ? 'ready' : 'unavailable', this.available
+          ? 'DeepSeek 云端 TTS · stella 官方音色'
+          : '缺少 DEEPSEEK_API_KEY，云端语音不可用')
+      }
+      return Promise.resolve(this.available)
+    }
     if (!this.gpt) return Promise.resolve(this.available)
     if (this.closing) return Promise.resolve(false)
     this.probing ??= this.gpt.health().then(available => {
@@ -89,6 +111,7 @@ export class TtsService {
   }
 
   private expressiveIdentity(): string | undefined {
+    if (this.deepseek) return
     const config = this.options.expressive
     if (!config || this.closing) return
     const paths = [config.pythonPath, ...EXPRESSIVE_FILES.map(name => join(config.modelDir, name))]
@@ -268,11 +291,12 @@ export class TtsService {
   }
 
   private async execute(text: string, temporaryPath: string, style?: ExpressiveTtsStyle): Promise<{ durationMs: number; bytes: number }> {
-    if (!style && this.gpt) {
+    const remote = this.gpt ?? this.deepseek
+    if (!style && remote) {
       const controller = new AbortController()
       this.cancelCurrent = () => controller.abort()
       try {
-        const result = await this.gpt.synthesize(text, temporaryPath, controller.signal)
+        const result = await remote.synthesize(text, temporaryPath, controller.signal)
         await rename(temporaryPath, finalPathFromTemporary(temporaryPath))
         const info = await stat(finalPathFromTemporary(temporaryPath))
         return { durationMs: result.durationMs, bytes: info.size }

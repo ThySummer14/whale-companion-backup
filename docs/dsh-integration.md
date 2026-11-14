@@ -2052,3 +2052,51 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - `minecraftOffline` 默认关闭，供启用 OVO 的回环隔离服使用。正式 Coopcraft 的 0.118.0 状态快照记录了 Carpet＋CBI 上线、受控移动和实际回复生成的语音。正式状态以集中联调期间的留存结果为准。 [候选包](../dsh-companion-bot-0.118.0.tgz)
 - 使用同一份 0.118.0 安装包和 0.114 配套 CBI，在独立 DSH、Fabric 和 Carpet 上验收三个模拟日。首日观察后少一根原木，重新预检取消行动。次日消耗 1 根云杉原木，产出 4 块云杉木板，保留 2 根原木，工程回执仍为待续建。第三日从已核验的备料事实继续原目标，实际消耗其中 2 块木板，恢复西翼并回到距起点 0.086 格的位置。整栋独立核对 200 格，另由主人确认验收。决策采用确定性回环夹具，游戏动作和库存为实测。 [35 项隔离验收](../.work/house-supply-live-0.118/run-ea1b0lc9/evidence.json)
 - 配对状态核对了简短的备料回执，私有日常会话请求返回 403。冷重启后备料和续建回执保留，SQLite v44 完整性检查通过。365 项定向回归通过，包括按当前返回结构核对自主证据列表。隔离副本和临时配置清理约 247 MB。 [定向回归](../.work/house-supply-live-0.118/regression.log) · [清理记录](../.work/house-supply-live-0.118/run-ea1b0lc9/cleanup.json)
+
+## 148. Companion 0.119.0 Coopcraft 联机语音
+
+- Coopcraft 继续使用 Minecraft 1.21.1 Fabric、Carpet 假人和现有 CBI。测试用方块皮肤来自本地 DeepseekOVO 公开版。Windows 实例使用 CustomSkinLoader，从 `CustomSkinLoader/LocalSkin/skins/dafeiyu.png` 加载。3D YSM 模型仍需兼容环境。 [CustomSkinLoader](https://modrinth.com/mod/customskinloader)
+- 服务端安装 Simple Voice Chat 2.6.22 和 `apps/minecraft-voice` 的 Companion 转发模组。语音仅绑定 Mac mini 的 Tailscale 地址和 UDP 24454，游戏仍走 TCP 25565。模组使用私有 `~/.local/share/companion/minecraft/voice/owner` 内的白名单主人 UUID，检测主人进服后请求现有本地 Companion 接口，由 CBI 在主人附近进服。主人退出时，模组请求让它启动的会话离服。 [Simple Voice Chat 服务端设置](https://modrepo.de/minecraft/voicechat/wiki/server_setup)
+- 游戏私聊确认送达、且主人客户端连接了语音时，复用现有 GPT-SoVITS 和归档。服务端以当前连接的短时租约匹配语音片段，只向主人发送，片段在读取后清除。未启用转发时，仍可使用游戏私聊文字。短时间内有多条回复时，正在合成的语音与文字回复独立。
+- Mac mini 装入 0.119.0 后验证了真实生存模式进出服、无在线主人时拒绝在其身边生成、语音模组加载和跨 Tailscale 的 Simple Voice Chat UDP 应答。Windows 客户端当时离线，皮肤渲染、随主人进服和实际听音仍待该客户端确认。客户端安装包包含 1.21.1 Fabric 兼容模组、方块皮肤与操作说明。
+
+## 149. Companion 0.121.0 生存反馈与平原小屋
+
+- 移动遇到快速掉气或明显偏离时结束当前工具，回传实际状态。采集遇到低血量、持续受伤或缺氧时同样交还控制。游戏场景可以自己查询附近地形和原木、上浮，或依据一次新死亡回执复活。主人可以把一份现有草案绑定到具体施工区，角色随后可清理占地内的短草，并按真实预检和背包材料执行该草案。
+- 死亡回执从真实的服务端断线原因和死亡提示采集。游戏轮次会带上近期失败、死亡和角色自己保存的少量观察。正常记忆整理可保留她自己形成的做事习惯，证据仍来自真实交互。实服观察到她在寻路失败后改查原木和地形，自己调用上浮与复活。之前由主人明确要求复盘后产生的笔记单独看待。
+- 参考 DeepseekOVO 公开版的缺氧保护和撤退落脚检查，在既有 CBI 反射层加入换气、短距离寻找岸边和避开水面及陡落差的检查。低血量时允许撤退反射接手短时输入。建造、资源和走法继续由游戏会话选择。 [CBI 源码补丁](../patches/carpetbaritone-survival-reflex.patch)
+- CBI 187 项 Java 检查通过。隔离 Fabric 用实际生存假人在水下复现缺氧，空气量从 149 恢复至 296，Y 从 62.0 上升到 64.95。补丁 JAR `2d683e447d3f83c04a6a2a2252687ddeb33089df98c17c7ab6332897f4c9e856` 已装入 Coopcraft 测试服。宿主 74 项定向检查通过。 [水下实测回执](../.work/coopcraft-plains-house/native-water-evidence.json)
+
+## 150. Companion 0.124.0 Minecraft 过夜
+
+- 主人要求缺乏战斗能力时入夜停止露天活动。有可用房屋时进入避险，有可用床时可以睡觉，条件允许也可以在工作台用 3 个白色羊毛和 3 块木板合成白床。模型根据现场选择地点和动作。找床按已加载区块和实际床头回读，放置需消耗背包中的床，入睡由原版规则判定。
+- `mc_night_cover` 可以查找附近干燥土层，验证三层泥土、周围支撑和白天出口。进入时正常破坏脚下方块、回收掉落物并消耗一块泥土封顶。天亮后打开封顶，复用已验证的垫脚回程。工具回执写入 Minecraft 活动和共享经历。
+- 隔离 Fabric 从非正中心位置落到三格深，封顶后氧气 300、生命值 20。夜间出洞请求被拒绝，天亮后回收封顶泥土，垫三块回到地面，原木库存保留。白床合成、放置、检索、白天拒睡、夜间实际入睡均通过。187 项 Java、67 项宿主与 Worker 定向检查通过。 [隔离回执](../.work/coopcraft-plains-house/night-shelter-evidence.json) · [CBI 补丁](../patches/carpetbaritone-night-shelter.patch)
+- Coopcraft 测试服已装入 CBI 候选 `02b89de539647d114fea883460bb7b657abef3d47e92f82078458cf2f3c2e7f4`。原世界正常启动，语音端口恢复，Mac mini 健康接口报告 Companion 0.124.0。两份隔离服副本已清理，保留验收回执。
+- 大肥鱼在 Coopcraft 的白天生存回合中自行查找床和掩体。出生点附近没有通过地形预检的位置，稍后她在西北侧找到了六处符合条件的土层。该回合的寻路失败由采集工具即时交回明确的目标不可达回执。
+
+## 151. Companion 0.126.0 手机建筑审批与一起看 B 站
+
+Android 的「活动 → 建筑审批」从已配对宿主读待审小屋及最近施工状态。旧草案也会进入列表。展开同一张卡可看分层方块、用料和授权地块，预检通过后原按钮变为「确认开工」。预检绑定草案版本和地块，旧版预检失效时须重新核对。没有待审草案时，设备状态不返回授权地块坐标。确认仍调用现有 worker 施工并核验回执。
+
+「保存 Litematica 投影」下载所看版本的 `.litematic`。Coopcraft 使用 Fabric 1.21.1，Windows 客户端可装 [Litematica 0.19.51](https://modrinth.com/mod/litematica/version/0.19.51) 和 MaLiLib 0.21.1，把文件放入对应实例的 `.minecraft/schematics`。命令行从已构建的 npm 包提供同一编码器。离线操作，无需凭据，`--json` 成功返回 `ok: true` 和用料信息，失败返回 `ok: false` 与错误码，退出码 1。导出要求新文件名。
+
+```sh
+dsh-litematica --json doctor
+dsh-litematica --json inspect blueprint.json
+dsh-litematica --json export blueprint.json --out house.litematic
+```
+
+`blueprint.json` 可是小屋草案，也可是含 `width`、`height`、`depth` 和 `blocks` 的布局。配对 App 直接从宿主读取已保存草案，同一编码器生成投影。
+
+「一起看 B 站」按所选画面、声音或两者采集短片段，千问 AI 平台的 `qwen3.8-omni-flash` 用一条请求完成理解和角色回复。宿主进程从环境读取 `QWENCLOUD_API_KEY`，默认使用 `https://maas.qianwenaiapi.com/compatible-mode/v1`。片段留在有限的进程内存缓存，供追问复用，每个会话携带最近两轮文本。首轮完成后活动页显示观看回执。
+
+手机聊天的 DeepSeek 模型若支持 `low`，该场景默认使用 `low`。通知收件箱在五分钟内合并同一手机会话或动态帖的提醒，打开通知时只确认已显示的通知 ID。头像与音乐各保留一个主入口。按需朗读在聊天气泡下显示圆角播放控件。
+
+## 152. Companion 0.127.0 DeepSeek 云端 TTS 默认化
+
+- 默认 `ttsProvider=deepseek`：整段 `POST https://api.deepseek.com/v1/tools/tts`（stella 官方音色，与鲸鱼娘形象同源），密钥从宿主环境 `DEEPSEEK_API_KEY` 读取；Companion 继续负责队列、真实任务状态、超时、WAV 校验与缓存。官方工具 API 含 Search/Fetch/OCR/ASR/TTS，但**没有歌唱能力**，歌唱管线（Seed-VC/RVC/SoulX）保持本地不变。
+- 云端流式 WAV 的 RIFF 与 data 长度为 `0xFFFFFFFF` 占位；provider 在校验前回填真实长度（首轮部署曾因此合成失败，已加回归）。表情风格（happy/sad）仅本地 Provider 声明，云端默认不 advertise；`ttsProvider=gpt-sovits` 可完整回退本地声线与表情。
+- 7 项 provider/service 新测试、48 项语音与歌唱回归、`pnpm typecheck` 通过。正式 Mac mini 已替换 bundle（旧包备份于 `backups/bundle-0.126.0-*`），plist 环境注入密钥（launchd 需 bootout+bootstrap 才加载新环境）；能力视图报告 `DeepSeek 云端 TTS · stella 官方音色`。模拟器端到端：聊天页 Listen → 云端合成 → Pause audio 播放态，宿主 `media/voice` 新增真实 WAV。
+- 资源清理：`ai.companion.bot.gsv` 服务 bootout、plist 移入 backups 禁用备份；删除 `gsv/GPT-SoVITS`、`.venv`、`nltk_data`、日志与测试音频（4.3G→324K），保留 `gsv/voice/` 参考音频供歌唱与回退；成功语音缓存（8.6MB）保留可重播，无孤儿临时文件。mini 未配置 ASR，无本地识别模型可删。
+- 未验：真机听感；WebSocket 实时流式接入（当前为整段流式收集）；云端下表情风格不可用属预期。

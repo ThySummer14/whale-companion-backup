@@ -1,12 +1,13 @@
 {
   "name": "dsh-companion-bot",
-  "version": "0.118.0",
+  "version": "0.127.0",
   "private": true,
   "description": "A single-character companion workbench for DeepSeek Harness",
   "license": "UNLICENSED",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "bin": { "dsh-litematica": "lib/dsh-litematica.js" },
   "exports": {
     ".": {
       "types": "./lib/index.d.ts",
@@ -29,6 +30,7 @@
     "scripts/run-indextts2-tts.py"
   ],
   "scripts": {
+    "app:preview": "node scripts/preview-app.mjs",
     "build": "tsdown && cp src/host/tts-worker.py lib/tts-worker.py && cp -R src/avatar lib/avatar && cp apps/minecraft-worker/msa.mjs lib/msa.mjs && cp apps/minecraft-worker/console.sh lib/minecraft-console.sh && cp apps/minecraft-worker/NOTICE.txt lib/minecraft-worker-NOTICE.txt && cp apps/minecraft-worker/UPSTREAM-LICENSE.txt lib/minecraft-worker-UPSTREAM-LICENSE.txt",
     "typecheck": "tsc --noEmit",
     "check": "pnpm typecheck && pnpm build && pnpm --filter @companion/mobile typecheck",

@@ -57,7 +57,7 @@
 - 每 10 秒 ping 保活与 25 秒 watchdog，支持半开连接恢复；撤销为订阅终止状态，旧连接回调不会使其重连。
 - 真实动态时间线：SQLite 保存文字动态与一层回复，用户可发布、回复和删除自己的内容；角色通过受控 Agent 工具发布，事件通知与断线后的列表对账复用现有连接。
 - Mac mini 工作台和手机均可查看动态及回复；角色与手机用户的作者身份分离，不由客户端冒充角色。
-- GPT-SoVITS v5 turbo 大肥鱼声线：真实助手消息按需通过独立常驻服务合成，MPS 全精度、单任务队列、1500 字上限、60 秒超时、WAV 缓存和失败重试；任务返回真实执行状态，不自动朗读全部回复。
+- DeepSeek 云端 TTS（stella 官方音色）为默认语音 Provider：真实助手消息按需合成、单任务队列、1500 字上限、WAV 缓存和失败重试；任务返回真实执行状态，不自动朗读全部回复。本地 GPT-SoVITS 大肥鱼声线保留为配置回退。
 - 语音只从持久历史中的助手消息生成，媒体文件权限为 600；设备通过鉴权的任务／音频接口访问，不能传入任意文件路径。
 - Expo App 包含配对、场景、流式聊天、取消、历史与断线恢复；原生凭据使用 SecureStore。
 - 主要界面采用浅色，包含角色中心、图标导航、紧凑聊天输入区、短促原生转场与按压反馈；不把 X 的深色外观当作产品要求。
@@ -78,6 +78,8 @@
 - **单用户、私网优先**：手机端只通过 Tailscale 访问，不开放公网，不实现多人社交平台。
 
 ## 构建与安装
+
+Mac 本地预览可双击根目录的 `预览手机App.command`，或运行 `pnpm app:preview`，直接在已有 Android 模拟器中打开真实 Companion App。默认复用安装包，不重新编译或下载镜像；热重载、手动重建和存储限制见 [本地 App 预览](docs/app-preview.md)。
 
 安卓 DSH Go 版源码位于 [apps/dsh-go](apps/dsh-go/)，基于上游 `v1.0.13`，以独立的 `companion` flavor 和 `lib/whale_main.dart` 启动。配对时在 Mac mini 工作台的“设备”页填写 Tailscale HTTPS 地址，再将一次性链接粘贴到 App。图片动态需要 Companion `0.15.0+`，纯图片动态与回复需要 `0.15.1+`。
 
@@ -314,15 +316,14 @@ dsh --profile companion --host 127.0.0.1 --port 8787 --no-open
 - 手机“取消本机配对”只清除本地凭据；要禁止设备继续访问，必须在“设备”页执行“立即撤销”。
 - 管理 API 位于 `/companion/api/`，只接受 DSH 本机同源请求。设备 API 位于 `/companion-device/api/`，两者不可混用。
 
-## 本地语音
+## 语音
 
-当前默认 Provider 是 **GPT-SoVITS v5 turbo**，使用用户本地二创工程中已有的大肥鱼参考声线，不再以 Piper 作为正式声线。独立运行环境位于 `~/.local/share/companion/gsv/`，不修改原二创工程，不进入系统 Python，也不把模型权重塞进 DSH tarball。
+当前默认 Provider 是 **DeepSeek 云端 TTS**（`ttsProvider=deepseek`，stella 官方音色，与鲸鱼娘形象同源），密钥从宿主进程环境 `DEEPSEEK_API_KEY` 读取；整段接口流式返回 WAV，Companion 负责队列、真实任务状态、超时、WAV 校验与缓存。角色表情风格（happy/sad）仅本地 Provider 提供，云端默认不对外声明该能力。
 
-- `api.py` 常驻于 `127.0.0.1:9881`，使用 MPS、全精度和 v5 turbo；不经过 Tailscale 暴露，也不允许手机调用其模型管理接口。
-- 固定参考音频为 `~/.local/share/companion/gsv/voice/deepseek_ref_b_7s.wav`，配套文本来自已有声线元数据。部署文件的输入读取采用 `soundfile` 回退，不要求额外安装 TorchCodec。
-- Companion 配置 `ttsProvider=gpt-sovits`、`ttsEndpoint=http://127.0.0.1:9881/`；`ttsReferenceAudio` 可用绝对路径覆盖默认声线。`ttsPythonPath` 与 `ttsModelPath` 仅保留给旧的 Piper 技术验证。
-- 模型服务通过 `/companion-health` 报告就绪状态。Companion 负责固定声线、请求队列、真实任务状态、60 秒超时、WAV 校验与缓存；首次合成需要等待，后续复用同一消息与声线的缓存。
-- Drama3 是后续高表现力 Provider 候选，尚未在本项目部署；其运行方式与 Mac mini 资源限制见 `docs/references.md`。
+- 本地 **GPT-SoVITS v5 turbo** 保留为回退：配置 `ttsProvider=gpt-sovits`、`ttsEndpoint=http://127.0.0.1:9881/` 即恢复大肥鱼二创声线与表情风格；独立运行环境位于 `~/.local/share/companion/gsv/`，不进入系统 Python，也不把模型权重塞进 DSH tarball。
+- 固定参考音频为 `~/.local/share/companion/gsv/voice/deepseek_ref_b_7s.wav`，配套文本来自已有声线元数据；`ttsReferenceAudio` 可用绝对路径覆盖。`ttsPythonPath` 与 `ttsModelPath` 仅保留给旧的 Piper 技术验证。
+- 本地模型服务通过 `/companion-health` 报告就绪状态；云端 Provider 以密钥是否配置报告就绪，不做付费探活。
+- 歌唱管线（Seed-VC/RVC/SoulX）与语音 Provider 独立，不受云端切换影响；官方 API 暂无歌唱能力。
 
 助手消息下方点击“听语音”才会合成，不自动朗读所有回复。设备接口为：
 
@@ -464,7 +465,7 @@ Mac mini：dsh web profile
                 │   └─ Domain Store（当前 SQLite schema v14）
                 │
                 ├─ 多个独立 Agent Session / Tools / Schedule
-                ├─ 独立 GPT-SoVITS Python 服务（当前）
+                ├─ DeepSeek 云端 TTS（默认）／独立 GPT-SoVITS Python 服务（回退）
                 ├─ 私有 Live2D 模型与官方 Core（当前）
                 ├─ Carpet＋CBI Minecraft worker（当前）
                 │
