@@ -2251,7 +2251,7 @@ dsh-litematica --json voxel blueprint.json --out observatory.schem
 dsh-litematica --json voxel blueprint.json --out observatory.nbt
 ```
 
-原创程序化样例「潮汐观星门」占地宽 65、深 33、高 40 格。隔离 Fabric 1.21.1 世界加载原生结构后，从实际区块存档回读 14,320 处声明坐标，全部匹配，其中包含 14,319 块实体和 1 处显式空气。未声明格和包围盒之外的对照块都保留。独立读取 Sponge 文件的 85,800 个网格，全量匹配。WorldEdit 7.3.8 在另一处实际导入并粘贴同一个 `.schem`，区块存档的 14,320 处声明坐标和状态全量匹配。三个定向回归、TypeScript 类型检查和构建通过。 [体素源稿](../.work/minecraft-voxel-bridge.XRSJny/star-gate.voxels.json) · [存档渲染](../.work/minecraft-voxel-bridge.XRSJny/star-gate-preview.png) · [隔离回执](../.work/minecraft-voxel-bridge.XRSJny/evidence.json)
+原创程序化样例「潮汐观星门」占地宽 65、深 33、高 40 格。隔离 Fabric 1.21.1 世界加载原生结构后，从实际区块存档回读 14,320 处声明坐标，全部匹配，其中包含 14,319 块实体和 1 处显式空气。未声明格和包围盒之外的对照块都保留。独立读取 Sponge 文件的 85,800 个网格，全量匹配。WorldEdit 7.3.8 在另一处实际导入并粘贴同一个 `.schem`，区块存档的 14,320 处声明坐标和状态全量匹配。三个定向回归、TypeScript 类型检查和构建通过。 [体素源稿](../blueprints/tidal-stargate/star-gate.voxels.json) · [图纸](../blueprints/tidal-stargate/star-gate.schem) · [存档渲染](../.work/minecraft-voxel-bridge.XRSJny/star-gate-preview.png) · [隔离回执](../.work/minecraft-voxel-bridge.XRSJny/evidence.json)
 
 2026 年 11 月 19 日在 Apple Silicon 的独立 Fabric 1.21.1 单人创造存档 `Axiom - Tidal Stargate` 完成 Axiom 6.1.5 实测。用 `File → Import Schematic` 导入同一份 Sponge v3 文件，生成放置预览并确认。保存后从原点 `(21, -61, 30)` 回读包围盒内的 85,800 格，14,319 块实体及全部留空均匹配。工作台用 `F8` 打开编辑器，`V` 预览，`Enter` 确认。 [工作台](<../.work/axiom-fabric-1.21.1.cfbMoz/Axiom Workshop.app>) · [成品实拍](../.work/axiom-fabric-1.21.1.cfbMoz/game/screenshots/2026-11-19_12.44.36.png) · [存档回执](../.work/axiom-fabric-1.21.1.cfbMoz/placement-evidence.json)
 
@@ -2263,7 +2263,7 @@ dsh-litematica --json voxel blueprint.json --out observatory.nbt
 dsh-litematica --json vox tideborn.vox --depth-as-z --palette palette.json --out tideborn.schem
 ```
 
-用用户的成品《潮生》验证了整座山城。图纸占地 239 × 199 格，高 124 格，将源稿 245 种使用色映射到 38 种方块状态。WorldEdit 7.3.8 在 Minecraft 1.21.1 隔离创造存档用 `//paste -a` 放在 `(0, -60, 0)`。分别解码图纸和关闭后的区块存档，各核对 5,897,564 格，749,430 块方块与全部留空匹配。海面用染色玻璃，窗户与灯塔用原版发光方块，作为静态作品保留海面与灯光的造型。测试存档副本已放进 Axiom Workshop 的单人存档列表「潮生 · TIDEBORN」。 [图纸](../.work/tideborn-minecraft.tGBy1I/tideborn.schem) · [存档渲染](../.work/tideborn-minecraft.tGBy1I/tideborn-world-preview.png) · [创造模式存档](../.work/tideborn-minecraft.tGBy1I/tideborn-creative-world.zip) · [逐格验收](../.work/tideborn-minecraft.tGBy1I/evidence.json)
+用用户的成品《潮生》验证了整座山城。图纸占地 239 × 199 格，高 124 格，将源稿 245 种使用色映射到 38 种方块状态。WorldEdit 7.3.8 在 Minecraft 1.21.1 隔离创造存档用 `//paste -a` 放在 `(0, -60, 0)`。分别解码图纸和关闭后的区块存档，各核对 5,897,564 格，749,430 块方块与全部留空匹配。海面用染色玻璃，窗户与灯塔用原版发光方块，作为静态作品保留海面与灯光的造型。测试存档副本已放进 Axiom Workshop 的单人存档列表「潮生 · TIDEBORN」。 [体素源稿](../blueprints/tideborn/tideborn.vox) · [图纸](../blueprints/tideborn/tideborn.schem) · [存档渲染](../.work/tideborn-minecraft.tGBy1I/tideborn-world-preview.png) · [创造模式存档](../.work/tideborn-minecraft.tGBy1I/tideborn-creative-world.zip) · [逐格验收](../.work/tideborn-minecraft.tGBy1I/evidence.json)
 
 ## 172. 配对手机体素蓝图确认
 
@@ -2291,7 +2291,7 @@ dsh-litematica --json vox tideborn.vox --depth-as-z --palette palette.json --out
 
 ## 175. 正式 Coopcraft 潮灯港与现场勘看
 
-2026 年 11 月 19 日通过 Tailscale 读取主人的最后存档位置 `(5939, 66, -77)` 和樱染茶肆北岸地形。Codex 设计「潮灯港」体素稿并导出 Sponge v3 图纸，入口在 `(5938, 64, -82)`，包含接岸引桥、泊船支栈桥、防波堤、装卸棚和灯塔。引桥绕过已有树苗。主人确认保留这份外形较规整的设计作为测试样本。 [体素稿](../.work/harbor-coopcraft.O1Fzgx/north-quay.vox) · [图纸](../.work/harbor-coopcraft.O1Fzgx/north-quay.schem) · [预览](../.work/harbor-coopcraft.O1Fzgx/north-quay-preview.png)
+2026 年 11 月 19 日通过 Tailscale 读取主人的最后存档位置 `(5939, 66, -77)` 和樱染茶肆北岸地形。Codex 设计「潮灯港」体素稿并导出 Sponge v3 图纸，入口在 `(5938, 64, -82)`，包含接岸引桥、泊船支栈桥、防波堤、装卸棚和灯塔。引桥绕过已有树苗。主人确认保留这份外形较规整的设计作为测试样本。 [体素稿](../blueprints/north-quay/north-quay.vox) · [图纸](../blueprints/north-quay/north-quay.schem) · [预览](../.work/harbor-coopcraft.O1Fzgx/north-quay-preview.png)
 
 正式服先刷新存档并备份对应地形、实体和兴趣点文件。按同一份图纸解出的坐标，服务端分组写入 1,919 个目标格，只替换现场核对过的空气和水。存档回读确认全部 1,919 个目标和 5 个保留对照匹配，临时区块票据已释放。 [正式施工回执](../.work/harbor-coopcraft.O1Fzgx/formal-placement.jsonl)
 
@@ -2301,7 +2301,7 @@ dsh-litematica --json vox tideborn.vox --depth-as-z --palette palette.json --out
 
 《潮阙港》选在潮灯港西侧外海，主世界蓝图原点 `(5040, 52, -304)`，对应海水方块层 Y=62。逐格预检了 572,049 个目标位置，现场均为空气、海水或水生植被。按主人要求直接施工并正常保存。Sponge v3 图纸按同一坐标切为 418 个原版结构模板，先建主体，再放梯子与灯笼。分批使用的临时区块票据已释放。
 
-首轮存档回读定位了 11 盏缺失的灯笼。正式服版把 10 处灯座改成上半砖，把阶梯旁的一盏移到邻格的磨制安山岩边沿。复验确认 572,049 个目标全部匹配，箱子和木桶有真实容器数据。主码头可站立位置为 `(5150, 68, -219)`，外港航道水面坐标为 `(5149, 63, -124)`。 [正式服适配图纸](../.work/tidegate-coopcraft.Htu3WJ/tidegate-coopcraft.schem) · [施工回执](../.work/tidegate-coopcraft.Htu3WJ/formal-progress.jsonl) · [最终存档核验](../.work/tidegate-coopcraft.Htu3WJ/final-progress.jsonl)
+首轮存档回读定位了 11 盏缺失的灯笼。正式服版把 10 处灯座改成上半砖，把阶梯旁的一盏移到邻格的磨制安山岩边沿。复验确认 572,049 个目标全部匹配，箱子和木桶有真实容器数据。主码头可站立位置为 `(5150, 68, -219)`，外港航道水面坐标为 `(5149, 63, -124)`。 [体素稿](../blueprints/tidegate/tidegate.vox) · [正式服适配图纸](../blueprints/tidegate/tidegate-coopcraft.schem) · [施工回执](../.work/tidegate-coopcraft.Htu3WJ/formal-progress.jsonl) · [最终存档核验](../.work/tidegate-coopcraft.Htu3WJ/final-progress.jsonl)
 
 ## 177. 同一目标跨日接续
 
@@ -2348,7 +2348,7 @@ dsh-litematica --json vox tideborn.vox --depth-as-z --palette palette.json --out
 Mac mini 的 Companion `0.128.0` 和 Coopcraft 正式服在线，沿用现有配置与存档。正式服 CBI 使用已有的材料配色版本，JAR SHA-256 以 `15367b0f` 开头。跟随平视、精确落脚点、床交互和聊天续接的近期改动已在本地检查，仍待正式部署。Mac mini 的容器启动脚本含当机路径，保留在该机 `server/start.sh`。
 
 - 本机聊天隔离验收对应的 Companion 包 SHA-256 以 `925858c2` 开头。暂停提交另外把既有传送和切换模式登记进工具权限清单。从暂停提交恢复部署时可以重新构建对应包。 [隔离验收](../.work/bot-core-chat.9HxvuS/acceptance.json) · [验收用包](../.work/bot-core-chat.9HxvuS/dsh-companion-bot-0.128.0.tgz)
-- 本机 CBI 候选包包含跟随平视、落脚点和床交互。SHA-256 以 `5f1201f8` 开头。潮灯港和潮阙港的原图与正式服施工回执保留在第 175、176 节引用的本机目录。 [CBI 验收](../.work/cbi-bed-routine.7V0PId/evidence.json) · [CBI 候选包](../.work/cbi-bed-routine.7V0PId/carpetbaritoneintegration-v1.7.1+260820-co-play.jar)
+- 本机 CBI 候选包包含跟随平视、落脚点和床交互。SHA-256 以 `5f1201f8` 开头。潮灯港、潮阙港、潮生和潮汐观星门的体素原稿与图纸收录在蓝图目录。正式服施工回执保留在第 175、176 节引用的本机目录。 [原创蓝图](../blueprints/README.md) [CBI 验收](../.work/cbi-bed-routine.7V0PId/evidence.json) · [CBI 候选包](../.work/cbi-bed-routine.7V0PId/carpetbaritoneintegration-v1.7.1+260820-co-play.jar)
 - Android 定制源码可从固定上游加补丁恢复，重建的源码树与本机一致。保留了本地 APK 和模拟器数据。 [安卓源码恢复](../backups/README.md)
 
 暂停前通过 `pnpm check` 和 1,903 项 Companion 与 Worker 自动检查。恢复本机开发依赖时运行 `pnpm install --frozen-lockfile`。Flutter 源码检出保留在 `.work/toolchain/flutter`，固定为 `3.47.7`，重新构建安卓时可用该检出的 `bin/flutter precache --android` 补齐工具缓存。Mac mini 清理了旧 Gradle 缓存、构建中间产物和 Python 安装包下载缓存。
