@@ -89,6 +89,8 @@ test('initiative tools reject aborted, malformed and no-longer-authorized calls'
     { ...valid, goal: '很短' }, { ...valid, goal: '先去看看林边，再\n决定怎么回来' },
     { ...valid, goal: '今天想检查营地\u202e旁的森林' }, { ...valid, goal: '森'.repeat(121) },
     { ...valid, evidenceId: 'recent 1' }, { ...valid, option: 'place:17' }, { ...valid, sessionId: 'external' },
+    { ...valid, keepGoalOpen: 'true' }, { ...valid, option: 'defer', keepGoalOpen: true },
+    { ...valid, option: 'house:all', keepGoalOpen: true }, { option: 'abandon', previousId: 'goal-1', keepGoalOpen: true },
   ]) await assert.rejects(h.execute(names[1], proposal), { name: 'ToolArgsError' })
   const controller = new AbortController()
   controller.abort(new Error('foreground changed'))
@@ -110,10 +112,10 @@ test('cancellation after staging suppresses successful tool termination', async 
   assert.deepEqual(h.conclusions, [])
 })
 
-test('the registered proposal tool preserves the requested clip and rejects partial or misplaced clip parameters', async t => {
+test('the registered proposal tool preserves the requested clip and continuation and rejects partial or misplaced clip parameters', async t => {
   const h = fixture(t)
   const clip = { start: 12, seconds: 6, mode: 'audio' }
-  const proposal = { ...valid, option: 'clip:2', clip }
+  const proposal = { ...valid, option: 'clip:2', clip, keepGoalOpen: true }
   assert.deepEqual(JSON.parse(await h.execute(names[1], proposal)), h.response)
   assert.deepEqual(h.calls[0].proposal, proposal)
   for (const candidate of [{ ...proposal, clip: undefined }, { ...proposal, clip: { ...clip, seconds: 9 } },

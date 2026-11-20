@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "companion_voice",
+  "version": "0.1.0",
+  "name": "Companion Voice",
+  "environment": "server",
+  "entrypoints": {
+    "voicechat": ["companion.minecraft.VoiceRelay"]
+  },
+  "depends": {
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "voicechat": ">=1.21.1-2.6.22"
+  }
+}

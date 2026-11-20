@@ -1,0 +1,435 @@
+diff --git a/src/main/java/baritone/Baritone.java b/src/main/java/baritone/Baritone.java
+index 4d39c1d..1642baa 100644
+--- a/src/main/java/baritone/Baritone.java
++++ b/src/main/java/baritone/Baritone.java
+@@ -16,6 +16,7 @@ import baritone.server.ServerInventoryController;
+ import baritone.server.ServerLookBehavior;
+ import baritone.server.ServerPathExecutor;
+ import baritone.server.BlockInteractionTask;
++import baritone.server.NightShelterTask;
+ import baritone.server.TrashDiscardController;
+ import baritone.server.ServerPathingScheduler;
+ import baritone.server.ServerFakeInteractionController;
+@@ -115,6 +116,7 @@ public final class Baritone implements IBaritone {
+     private ServerPathExecutor pathExecutor;
+     private ServerPathExecutor nextPathExecutor;
+     private BlockInteractionTask blockTask;
++    private NightShelterTask nightShelterTask;
+     private baritone.server.SafeReturnTask safeReturnTask;
+     private baritone.server.CampSurveyExecution campSurveyTask;
+     private final java.util.LinkedHashMap<String, baritone.server.CampSurveyExecution> surveys =
+@@ -319,9 +321,13 @@ public final class Baritone implements IBaritone {
+         TickEvent pre = new TickEvent(EventState.PRE, TickEvent.Type.IN, tickCount);
+         gameEventHandler.onTick(pre);
+         gameEventHandler.onPlayerUpdate(new PlayerUpdateEvent(EventState.PRE));
+-        if (campSurveyTask != null) {
+-            campSurveyTask.tick();
+-            if (campSurveyTask.isFinished()) campSurveyTask = null;
++        if (campSurveyTask != null || nightShelterTask != null) {
++            if (nightShelterTask != null) {
++                if (nightShelterTask.tick()) nightShelterTask = null;
++            } else {
++                campSurveyTask.tick();
++                if (campSurveyTask.isFinished()) campSurveyTask = null;
++            }
+             gameEventHandler.onPlayerUpdate(new PlayerUpdateEvent(EventState.POST));
+             gameEventHandler.onPostTick(new TickEvent(EventState.POST, TickEvent.Type.IN, tickCount));
+             return;
+@@ -624,6 +630,11 @@ public final class Baritone implements IBaritone {
+         statusMessenger.beginTask("方块操作 " + task.status());
+     }
+ 
++    public void startNightShelterTask(NightShelterTask task) {
++        cancelAll();
++        nightShelterTask = Objects.requireNonNull(task, "task");
++    }
++
+     public void startSafeReturnTask(baritone.server.SafeReturnTask task) {
+         cancelAll();
+         this.safeReturnTask = Objects.requireNonNull(task, "task");
+@@ -751,6 +762,10 @@ public final class Baritone implements IBaritone {
+         statusMessenger.cancelTask();
+         cancelPath();
+         pathingControlManager.cancelEverything();
++        if (nightShelterTask != null) {
++            nightShelterTask.cancel();
++            nightShelterTask = null;
++        }
+         if (blockTask != null) {
+             blockTask.cancel();
+             blockTask = null;
+diff --git a/src/main/java/baritone/command/defaults/NavigationUtilityCommand.java b/src/main/java/baritone/command/defaults/NavigationUtilityCommand.java
+index 534079c..0e3689e 100644
+--- a/src/main/java/baritone/command/defaults/NavigationUtilityCommand.java
++++ b/src/main/java/baritone/command/defaults/NavigationUtilityCommand.java
+@@ -9,7 +9,7 @@ public final class NavigationUtilityCommand extends ServerCommand {
+                 "goal", "path", "proc", "eta", "version",
+                 "repack", "surface", "top", "thisway", "forward",
+                 "axis", "highway", "tunnel", "return", "escape", "survey", "surveyroute", "surveytrail", "campgather", "homebuild", "homebuildone", "homebuildrecover",
+-                "shield", "sel", "selection", "s",
++                "shield", "nightbed", "nightshelter", "sel", "selection", "s",
+                 "waypoints", "waypoint", "wp",
+                 "sethome", "home",
+                 "blacklist", "find", "pickup",
+diff --git a/src/main/java/baritone/server/BasicGoalCommandHandler.java b/src/main/java/baritone/server/BasicGoalCommandHandler.java
+index 38c8405..acca418 100644
+--- a/src/main/java/baritone/server/BasicGoalCommandHandler.java
++++ b/src/main/java/baritone/server/BasicGoalCommandHandler.java
+@@ -241,6 +241,7 @@ public final class BasicGoalCommandHandler {
+             case "campgather" -> reply(fakePlayer, sender, campGather(sender, fakePlayer, baritone, args));
+             case "homebuild", "homebuildone", "homebuildrecover" -> reply(fakePlayer, sender, homeBuild(sender, fakePlayer, baritone, args));
+             case "shield" -> shield(sender, fakePlayer, baritone, args);
++            case "nightbed", "nightshelter" -> nightShelter(sender, fakePlayer, baritone, args);
+             case "thisway", "forward" ->
+                     setThisWay(sender, fakePlayer, baritone, args);
+             case "axis", "highway" ->
+@@ -2175,7 +2176,7 @@ public final class BasicGoalCommandHandler {
+         }
+         reply(fakePlayer, sender, baritone.server.llm.ExternalChatRelay.HELP);
+         reply(fakePlayer, sender,
+-                "导航: goto, come, y, goal, path, surface, return, survey, surveyroute, surveytrail, campgather, craft, buildcamp, homebuild, homebuildone, homebuildrecover, shield, thisway, axis, tunnel");
++                "导航: goto, come, y, goal, path, surface, return, survey, surveyroute, surveytrail, campgather, craft, buildcamp, homebuild, homebuildone, homebuildrecover, shield, nightbed, nightshelter, thisway, axis, tunnel");
+         reply(fakePlayer, sender,
+                 "任务: mine, areamine, collectItem, farm, build, schematica, litematica, clean, explore, follow, elytra");
+         reply(fakePlayer, sender,
+@@ -2186,6 +2187,26 @@ public final class BasicGoalCommandHandler {
+                 "格式: /tell <假人> cbi <命令>；不带 cbi 前缀的私聊会交给 AI");
+     }
+ 
++    private static void nightShelter(ServerPlayer sender, ServerPlayer player, Baritone baritone, String[] args) {
++        if (sender != player) throw new IllegalArgumentException("night-shelter-bot-only");
++        if (args[0].equalsIgnoreCase("nightbed") && (args.length == 4 || args.length == 5 && args[1].equals("place"))) {
++            int start = args.length - 3;
++            BlockPos position = new BlockPos(coordinate(args[start], "x"), coordinate(args[start + 1], "y"), coordinate(args[start + 2], "z"));
++            String result = start == 1 ? NightShelterTask.sleep(baritone, position) : NightShelterTask.deployBed(baritone, position);
++            reply(player, sender, "nightbed " + result);
++        } else if (args[0].equalsIgnoreCase("nightshelter") && args.length == 2) {
++            String phase = args[1];
++            if (phase.equals("status")) {
++                reply(player, sender, "nightshelter " + NightShelterTask.status(player));
++            } else if (phase.equals("sites")) {
++                reply(player, sender, "nightshelter sites " + NightShelterTask.sites(player));
++            } else if (phase.equals("enter") || phase.equals("open")) {
++                baritone.startNightShelterTask(NightShelterTask.start(baritone, phase.equals("open"),
++                        result -> reply(player, sender, "nightshelter " + result)));
++            } else throw new IllegalArgumentException("night-shelter-phase-invalid");
++        } else throw new IllegalArgumentException("night-shelter-arguments-invalid");
++    }
++
+     private static void shield(ServerPlayer sender, ServerPlayer player, Baritone baritone, String[] args) {
+         if (sender != player) throw new IllegalArgumentException("盾牌指令只接受假人自己的受控请求");
+         if (args.length < 3 || !args[2].matches("[a-f0-9]{32}")) {
+diff --git a/src/main/java/baritone/server/SurvivalCraftingService.java b/src/main/java/baritone/server/SurvivalCraftingService.java
+index 6ea8b0a..d4a4dfd 100644
+--- a/src/main/java/baritone/server/SurvivalCraftingService.java
++++ b/src/main/java/baritone/server/SurvivalCraftingService.java
+@@ -268,6 +268,7 @@ public final class SurvivalCraftingService {
+             case 'S' -> stack.is(Items.STICK);
+             case 'C' -> isStoneToolMaterial(stack);
+             case 'I' -> stack.is(Items.IRON_INGOT);
++            case 'W' -> stack.is(Items.WHITE_WOOL);
+             default -> false;
+         };
+     }
+@@ -316,6 +317,7 @@ public final class SurvivalCraftingService {
+         }
+         specs.put("stick", spec("stick", 1, false, "P", "P"));
+         specs.put("crafting_table", spec("crafting_table", 2, false, "PP", "PP"));
++        specs.put("white_bed", spec("white_bed", 3, true, "WWW", "PPP"));
+         specs.put("wooden_pickaxe", spec("wooden_pickaxe", 3, true,
+                 "PPP", " S ", " S "));
+         specs.put("stone_pickaxe", spec("stone_pickaxe", 3, true,
+diff --git a/src/main/java/baritone/server/NightShelterTask.java b/src/main/java/baritone/server/NightShelterTask.java
+new file mode 100644
+index 0000000..3a538dc
+--- /dev/null
++++ b/src/main/java/baritone/server/NightShelterTask.java
+@@ -0,0 +1,288 @@
++package baritone.server;
++
++import baritone.Baritone;
++import baritone.api.utils.Rotation;
++import net.minecraft.core.BlockPos;
++import net.minecraft.core.Direction;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.world.entity.item.ItemEntity;
++import net.minecraft.world.InteractionHand;
++import net.minecraft.world.item.BlockItem;
++import net.minecraft.world.item.Items;
++import net.minecraft.world.level.GameType;
++import net.minecraft.world.level.Level;
++import net.minecraft.world.level.block.BedBlock;
++import net.minecraft.world.level.block.Blocks;
++import net.minecraft.world.level.block.state.properties.BedPart;
++import net.minecraft.world.phys.AABB;
++import net.minecraft.world.phys.BlockHitResult;
++import net.minecraft.world.phys.Vec3;
++
++import java.util.function.Consumer;
++import java.util.ArrayList;
++import java.util.Comparator;
++
++/** A three-block survival shelter. Reuses the existing survival pillar for exit. */
++public final class NightShelterTask {
++    private static final String TAG = "companion_shelter:";
++    private final Baritone baritone;
++    private final ServerPlayer player;
++    private final ServerLevel world;
++    private final BlockPos surface;
++    private final boolean opening;
++    private final Consumer<String> feedback;
++    private int depth;
++    private int ticks;
++
++    private NightShelterTask(Baritone baritone, BlockPos surface, boolean opening, Consumer<String> feedback) {
++        this.baritone = baritone;
++        this.player = baritone.getPlayerContext().player();
++        this.world = player.serverLevel();
++        this.surface = surface;
++        this.opening = opening;
++        this.feedback = feedback;
++    }
++
++    static String status(ServerPlayer player) {
++        BlockPos surface = savedSurface(player);
++        if (surface == null) return "none";
++        ServerLevel world = player.serverLevel();
++        if (!Level.OVERWORLD.equals(world.dimension()) || !sameColumn(player.blockPosition(), surface)
++                || player.getY() >= surface.getY() || !world.hasChunkAt(surface)) return "none";
++        if (world.getBlockState(surface.below()).is(Blocks.DIRT)) return "covered " + coordinates(surface);
++        return "shaft " + coordinates(surface);
++    }
++
++    static String sleep(Baritone baritone, BlockPos position) {
++        ServerPlayer player = baritone.getPlayerContext().player();
++        requireSurvival(player);
++        ServerLevel world = player.serverLevel();
++        if (!world.hasChunkAt(position) || !(world.getBlockState(position).getBlock() instanceof BedBlock)
++                || !world.mayInteract(player, position)
++                || !baritone.getFakeInteractionController().canBreakFromHere(position)) {
++            throw new IllegalArgumentException("night-bed-unreachable");
++        }
++        if (player.isSleeping()) return "sleeping";
++        baritone.cancelAll();
++        baritone.getFakeInteractionController().interactBlock(position);
++        return player.isSleeping() ? "sleeping" : "refused";
++    }
++
++    static String deployBed(Baritone baritone, BlockPos foot) {
++        ServerPlayer player = baritone.getPlayerContext().player();
++        requireSurvival(player);
++        ServerLevel world = player.serverLevel();
++        if (!bedGround(player, foot)) throw new IllegalArgumentException("night-bed-ground-refused");
++        Direction direction = null;
++        for (Direction facing : Direction.Plane.HORIZONTAL) {
++            if (bedGround(player, foot.relative(facing))) {
++                direction = facing;
++                break;
++            }
++        }
++        if (direction == null) throw new IllegalArgumentException("night-bed-ground-refused");
++        BlockPos head = foot.relative(direction);
++        var controller = baritone.getFakeInteractionController();
++        if (!controller.canBreakFromHere(foot.below())) throw new IllegalArgumentException("night-bed-unreachable");
++        if (!baritone.getInventoryController().selectItem(stack ->
++                stack.getItem() instanceof BlockItem item && item.getBlock() instanceof BedBlock)) {
++            throw new IllegalArgumentException("night-bed-item-missing");
++        }
++        baritone.cancelAll();
++        var stack = player.getMainHandItem();
++        int count = stack.getCount();
++        float yaw = player.getYRot();
++        try {
++            player.setYRot(direction.toYRot());
++            BlockHitResult hit = new BlockHitResult(Vec3.atBottomCenterOf(foot), Direction.UP, foot.below(), false);
++            player.gameMode.useItemOn(player, world, stack, InteractionHand.MAIN_HAND, hit);
++            player.inventoryMenu.broadcastChanges();
++        } finally {
++            player.setYRot(yaw);
++        }
++        var placed = world.getBlockState(head);
++        if (placed.getBlock() instanceof BedBlock && placed.getValue(BedBlock.PART) == BedPart.HEAD
++                && stack.getCount() == count - 1) return "placed " + coordinates(head);
++        return "refused";
++    }
++
++    private static boolean bedGround(ServerPlayer player, BlockPos pos) {
++        ServerLevel world = player.serverLevel();
++        if (!world.hasChunkAt(pos) || !world.mayInteract(player, pos)
++                || !world.getBlockState(pos).isAir() || !world.getBlockState(pos.above()).isAir()
++                || player.getBoundingBox().intersects(new AABB(pos))) return false;
++        var support = world.getBlockState(pos.below());
++        return support.is(Blocks.DIRT) || support.is(Blocks.GRASS_BLOCK);
++    }
++
++    static String sites(ServerPlayer player) {
++        requireSurvival(player);
++        ServerLevel world = player.serverLevel();
++        BlockPos origin = player.blockPosition();
++        var sites = new ArrayList<BlockPos>();
++        for (BlockPos pos : BlockPos.betweenClosed(origin.offset(-7, -3, -7), origin.offset(7, 3, 7))) {
++            if (!world.hasChunkAt(pos) || !world.getBlockState(pos).isAir()
++                    || !world.getBlockState(pos.above()).isAir() || !world.canSeeSky(pos)) continue;
++            if (safeShaft(player, pos)) sites.add(pos.immutable());
++        }
++        return sites.stream().sorted(Comparator.comparingDouble(origin::distSqr)).limit(6)
++                .map(NightShelterTask::coordinates).reduce((a, b) -> a + "," + b).orElse("none");
++    }
++
++    static NightShelterTask start(Baritone baritone, boolean opening, Consumer<String> feedback) {
++        ServerPlayer player = baritone.getPlayerContext().player();
++        requireSurvival(player);
++        ServerLevel world = player.serverLevel();
++        BlockPos surface = opening ? savedSurface(player) : player.blockPosition();
++        if (!player.onGround() || player.isSleeping() || surface == null || !sameColumn(player.blockPosition(), surface)) {
++            throw new IllegalArgumentException("night-shelter-position-refused");
++        }
++        if (opening) {
++            if (!world.isDay()) throw new IllegalArgumentException("night-shelter-wait-for-day");
++            if (player.getY() >= surface.getY()) {
++                player.removeTag(tag(surface));
++                throw new IllegalArgumentException("night-shelter-already-outside");
++            }
++            if (!world.mayInteract(player, surface.below())) throw new IllegalArgumentException("night-shelter-protected");
++        } else {
++            if (!status(player).equals("none") || !world.canSeeSky(surface) || !safeShaft(player, surface)) {
++                throw new IllegalArgumentException("night-shelter-ground-refused");
++            }
++            BlockPos old = savedSurface(player);
++            if (old != null) player.removeTag(tag(old));
++            if (!player.addTag(tag(surface))) throw new IllegalArgumentException("night-shelter-state-refused");
++        }
++        return new NightShelterTask(baritone, surface, opening, feedback);
++    }
++
++    private static boolean safeShaft(ServerPlayer player, BlockPos surface) {
++        ServerLevel world = player.serverLevel();
++        for (int down = 1; down <= 3; down++) {
++            BlockPos target = surface.below(down);
++            if (!world.hasChunkAt(target) || !world.mayInteract(player, target)) return false;
++            var state = world.getBlockState(target);
++            if (!state.is(Blocks.DIRT) && !(down == 1 && state.is(Blocks.GRASS_BLOCK))) return false;
++            for (Direction dir : Direction.Plane.HORIZONTAL) {
++                BlockPos wall = target.relative(dir);
++                if (!world.hasChunkAt(wall) || SafeReturnPlan.read(world, wall) != SafeReturnPlan.Cell.SUPPORT) return false;
++            }
++        }
++        if (SafeReturnPlan.read(world, surface.below(4)) != SafeReturnPlan.Cell.SUPPORT) return false;
++        for (Direction dir : Direction.Plane.HORIZONTAL) {
++            if (SafeReturnPlan.validExit(surface.relative(dir), pos -> SafeReturnPlan.read(world, pos))) return true;
++        }
++        return false;
++    }
++
++    private static void requireSurvival(ServerPlayer player) {
++        if (!player.isAlive() || !Level.OVERWORLD.equals(player.serverLevel().dimension())
++                || player.gameMode.getGameModeForPlayer() != GameType.SURVIVAL || player.isInWater()) {
++            throw new IllegalArgumentException("night-shelter-survival-required");
++        }
++    }
++
++    public boolean tick() {
++        BlockPos feet = player.blockPosition();
++        if (++ticks > 220) return finish("failed timeout");
++        if (!player.isAlive() || player.serverLevel() != world || player.isInWater()
++                || !sameColumn(feet, surface) || feet.getY() < surface.getY() - 3) return finish("failed interrupted");
++        var controller = baritone.getFakeInteractionController();
++        BlockPos cap = surface.below();
++        if (opening) {
++            if (world.getBlockState(cap).isAir()) {
++                collectDirt(new AABB(cap).expandTowards(0, -3, 0));
++                int rise = surface.getY() - feet.getY();
++                if (baritone.getInventoryController().countReturnBlocks() >= rise) return finish("opened " + coordinates(surface));
++                return false;
++            }
++            if (!world.getBlockState(cap).is(Blocks.DIRT)) return finish("failed cap-changed");
++            controller.breakBlock(cap);
++            return false;
++        }
++        if (depth < 3) {
++            BlockPos target = surface.below(depth + 1);
++            if (world.getBlockState(target).isAir()) {
++                depth++;
++            } else if (player.onGround() && feet.equals(target.above())) {
++                if (depth == 0 && centerPlayer()) return false;
++                var state = world.getBlockState(target);
++                if (!world.mayInteract(player, target)
++                        || !state.is(Blocks.DIRT) && !(depth == 0 && state.is(Blocks.GRASS_BLOCK))) {
++                    return finish("failed ground-changed");
++                }
++                controller.breakBlock(target);
++            }
++            return false;
++        }
++        if (!player.onGround() || !feet.equals(surface.below(3))) return false;
++        if (!world.getBlockState(cap).isAir() || !world.mayInteract(player, cap)) return finish("failed cap-blocked");
++        collectDirt(new AABB(feet).inflate(0.15));
++        if (baritone.getInventoryController().countReturnBlocks() < 3
++                || !baritone.getInventoryController().selectBlock(Blocks.DIRT)) return false;
++        for (Direction dir : Direction.Plane.HORIZONTAL) {
++            BlockPos support = cap.relative(dir);
++            if (SafeReturnPlan.read(world, support) != SafeReturnPlan.Cell.SUPPORT) continue;
++            Vec3 contact = support.getCenter().relative(dir.getOpposite(), 0.5);
++            BlockHitResult hit = new BlockHitResult(contact, dir.getOpposite(), support, false);
++            if (controller.placeSelectedBlock(cap, hit) && world.getBlockState(cap).is(Blocks.DIRT)) {
++                return finish("covered " + coordinates(surface));
++            }
++        }
++        return finish("failed cap-placement");
++    }
++
++    public void cancel() {
++        finish("failed cancelled");
++    }
++
++    private boolean centerPlayer() {
++        Vec3 offset = Vec3.atBottomCenterOf(surface).subtract(player.position());
++        if (Math.hypot(offset.x, offset.z) <= 0.14D) {
++            baritone.getInputController().clearEmergencyMovement();
++            return false;
++        }
++        float yaw = (float) Math.toDegrees(Math.atan2(-offset.x, offset.z));
++        baritone.getInputController().setPriorityMovement(new Rotation(yaw, 0), true, false, false);
++        return true;
++    }
++
++    private void collectDirt(AABB box) {
++        for (ItemEntity drop : world.getEntitiesOfClass(ItemEntity.class, box, item -> item.getItem().is(Items.DIRT))) {
++            baritone.getFakeInteractionController().pickup(drop);
++        }
++    }
++
++    private boolean finish(String result) {
++        baritone.getInputController().clearEmergencyMovement();
++        if (player.getY() >= surface.getY()) player.removeTag(tag(surface));
++        feedback.accept(result);
++        return true;
++    }
++
++    private static boolean sameColumn(BlockPos first, BlockPos second) {
++        return first.getX() == second.getX() && first.getZ() == second.getZ();
++    }
++
++    private static String coordinates(BlockPos surface) {
++        return surface.getX() + " " + surface.getY() + " " + surface.getZ();
++    }
++
++    private static String tag(BlockPos surface) {
++        return TAG + coordinates(surface).replace(' ', ',');
++    }
++
++    private static BlockPos savedSurface(ServerPlayer player) {
++        for (String tag : player.getTags()) {
++            if (!tag.startsWith(TAG)) continue;
++            String[] xyz = tag.substring(TAG.length()).split(",");
++            if (xyz.length != 3) continue;
++            try {
++                return new BlockPos(Integer.parseInt(xyz[0]), Integer.parseInt(xyz[1]), Integer.parseInt(xyz[2]));
++            } catch (NumberFormatException ignored) {
++                // Only the generated coordinate tag is usable.
++            }
++        }
++        return null;
++    }
++}

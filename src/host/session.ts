@@ -5,7 +5,7 @@ import { createUserMessage, type Message, type UserMessage } from '@deepseek-ai/
 import { deriveEventMessage, isAppendSurfaceEvent, SessionId, SessionLogOffset, type Session } from '@deepseek-ai/dsh-session'
 import { SessionPersistenceNotFoundError } from '@deepseek-ai/dsh-session-persistence'
 import type { CompanionStore } from '../core/store.ts'
-import { BILIBILI_AUTONOMY_CONTEXT, BILIBILI_CLIP_CONTEXT, BILIBILI_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_RECOVERY_CONTEXT, MINECRAFT_SHARE_CONTEXT } from '../core/model.ts'
+import { BILIBILI_AUTONOMY_CONTEXT, BILIBILI_CLIP_CONTEXT, BILIBILI_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_RECOVERY_CONTEXT, MINECRAFT_SHARE_CONTEXT, type SessionBinding } from '../core/model.ts'
 import type { BindContextInput } from '../protocol/api.ts'
 import { isCompanionDecisionContext, restrictCompanionTools } from './tool-policy.ts'
 import { isFeedReplyContext } from '../core/feed-reply.ts'
@@ -114,6 +114,13 @@ export class SessionService {
     })
     this.handles.set(sessionId, handle)
     return handle.agent
+  }
+
+  private assertCurrentAgent(binding: SessionBinding, agent: Agent, code = 'binding-conflict'): void {
+    if (this.store.bindingByContext(binding.contextId)?.sessionId !== binding.sessionId ||
+        agent.id !== binding.sessionId || this.ctx.agents.get(agent.id) !== agent) {
+      throw new DeviceAuthError(409, code)
+    }
   }
 
   async create(input: CreateSessionInput, replaceReview = false, assertAuthorized?: () => void, recoveryPlacement = false, recoveryCompletion = false, dailyInitiative = false): Promise<SessionLifecycleView> {
@@ -267,24 +274,20 @@ export class SessionService {
     }
     if (!binding) throw new Error('Context binding not found')
     const agent = await this.resume(binding.sessionId)
-    if ((reactiveReply || ['memory.curator', BILIBILI_AUTONOMY_CONTEXT, BILIBILI_REFLECTION_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_SHARE_CONTEXT, MINECRAFT_RECOVERY_CONTEXT].includes(contextId) ||
-      contextId === DAILY_AUTONOMY_CONTEXT && assertAuthorized !== undefined) &&
-      (this.store.bindingByContext(contextId)?.sessionId !== binding.sessionId || this.ctx.agents.get(agent.id) !== agent)) {
-      throw new DeviceAuthError(409, 'curator-binding-conflict')
+    const managedDecision = reactiveReply || ['memory.curator', BILIBILI_AUTONOMY_CONTEXT, BILIBILI_REFLECTION_CONTEXT, DAILY_REFLECTION_CONTEXT,
+      DAILY_VISIT_CONTEXT, MINECRAFT_SHARE_CONTEXT, MINECRAFT_RECOVERY_CONTEXT].includes(contextId) ||
+      contextId === DAILY_AUTONOMY_CONTEXT && assertAuthorized !== undefined
+    const conflict = managedDecision ? 'curator-binding-conflict' : submission?.expectedSessionId ? 'chat-session-changed' : 'binding-conflict'
+    const assertCurrent = () => {
+      submission?.assertAuthorized()
+      this.assertCurrentAgent(binding, agent, conflict)
     }
+    assertCurrent()
     const receipt = (message: UserMessage, replayed = false): SendMessageReceipt => ({
       accepted: true, contextId, sessionId: binding.sessionId, messageId: String(message.id), ...attachmentMetadata(message),
       ...(replayed && submission?.expectedSessionId && { replayed: true }),
     })
     const content: UserMessage['content'][number][] = text ? [{ type: 'text', text }] : []
-    const assertCurrent = () => {
-      if (!submission) return
-      submission.assertAuthorized()
-      if (this.store.bindingByContext(contextId)?.sessionId !== binding.sessionId || this.ctx.agents.get(agent.id) !== agent) {
-        throw new DeviceAuthError(409, submission.expectedSessionId ? 'chat-session-changed' : 'binding-conflict')
-      }
-    }
-    assertCurrent()
     const requestKey = submission?.requestKey
     const items = submission?.items
     const requestHash = requestKey ? mobileRequestHash(text, voiceReply, items) : undefined
@@ -326,6 +329,7 @@ export class SessionService {
       const titles = this.ctx.get?.('sessionTitle')
       if (titles && titles.get(agent.session)?.source.kind !== 'user') titles.rename(agent.session, binding.label)
     }
+    this.assertCurrentAgent(binding, agent, conflict)
     agent.followup(message)
     // DSH can claim the inbox entry before it appends the original user event.
     if (requestKey) this.mobileRequests.get(agent.session)?.messages.set(requestKey, message)
@@ -345,6 +349,7 @@ export class SessionService {
     const binding = this.store.bindingByContext(contextId)
     if (!binding) throw new Error('Context binding not found')
     const agent = await this.resume(binding.sessionId)
+    this.assertCurrentAgent(binding, agent)
     agent.cancel({ kind: 'user' })
     this.store.recordActivity({ contextId, sessionId: binding.sessionId, source: 'core.chat', kind: 'message.cancel.requested', summary: '已请求取消当前轮次', status: 'warning' })
   }

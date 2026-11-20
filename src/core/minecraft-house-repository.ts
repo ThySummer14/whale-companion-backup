@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { DatabaseSync } from 'node:sqlite'
-import { MinecraftHouseDraft, MinecraftHouseLayout, type MinecraftHouseDraftInput, type MinecraftHouseReceipt,
+import { MinecraftHouseDraft, MinecraftHouseDraftInput, type MinecraftHouseReceipt,
   type MinecraftHouseRevisionHistory, type MinecraftHouseRevisionInput } from './minecraft-house.ts'
 import { HOUSE_CELL_CAPABILITY, HOUSE_CELL_TASK_PREFIX, type HouseRecoveryPlacedCell, type HouseRecoveryPlacementMode } from './minecraft-recovery.ts'
 import { MINECRAFT_RECOVERY_CONTEXT } from './model.ts'
@@ -39,6 +39,11 @@ export class MinecraftHouseRepository {
 
   list(): Draft[] {
     return this.db.prepare(`${SELECT_DRAFTS} ORDER BY created_at DESC, id DESC LIMIT 40`).all().map(row => this.draft(row)!)
+  }
+
+  listForApprovals(): Draft[] {
+    return this.db.prepare(`${SELECT_DRAFTS} ORDER BY (status='draft') DESC, created_at DESC, id DESC LIMIT 40`)
+      .all().map(row => this.draft(row)!)
   }
 
   get(id: string): Draft | undefined {
@@ -120,7 +125,8 @@ export class MinecraftHouseRepository {
     return this.transaction(() => {
       const draft = this.get(id)
       if (!draft || draft.status !== 'draft' || draft.revision !== input.expectedRevision) return
-      if (!MinecraftHouseLayout.safeParse({ ...draft.layout, blocks: input.blocks }).success) return
+      if (!MinecraftHouseDraftInput.safeParse({ name: draft.name, zoneId: draft.zoneId, assumptions: draft.assumptions,
+        layout: { ...draft.layout, blocks: input.blocks } }).success) return
       if (draft.layout.blocks === input.blocks) return draft
 
       const updated = this.db.prepare(`UPDATE minecraft_house SET payload_json=json_set(payload_json,'$.layout.blocks',?)
@@ -138,6 +144,11 @@ export class MinecraftHouseRepository {
       UNION ALL SELECT 0,json_extract(payload_json,'$.layout.blocks'),created_at FROM minecraft_house
       WHERE id=? AND ${CURRENT_REVISION}=0 ORDER BY revision DESC`).all(id, id) as RevisionRow[]
     if (rows.length) return { revisions: rows.map(({ revision, blocks, created_at }) => ({ revision, blocks, createdAt: created_at })) }
+  }
+
+  bindDraftZone(id: string, zoneId: string): boolean {
+    return this.db.prepare("UPDATE minecraft_house SET zone_id=? WHERE id=? AND status='draft' AND (zone_id IS NULL OR zone_id=?)")
+      .run(zoneId, id, zoneId).changes === 1
   }
 
   start(id: string, zoneId: string, taskId: string, expectedRevision?: number): boolean {

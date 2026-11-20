@@ -18,6 +18,7 @@ const windowFields = {
   allowMinecraftGather: z.literal(true).optional(),
   allowMinecraftProjectGather: z.literal(true).optional(),
   houseProjectId: z.uuid().optional(),
+  allowHouseProjectFull: z.literal(true).optional(),
   allowHouseProjectSupply: z.literal(true).optional(),
 }
 
@@ -54,8 +55,8 @@ function supportedProjectGather({ allowMinecraftProjectGather, allowMinecraftPro
   return allowMinecraftProjectGather !== true || allowMinecraftProject === true && allowMinecraftGather === true
 }
 
-function supportedHouseSupply({ allowHouseProjectSupply, houseProjectId }: MinecraftSurveyWindowInput): boolean {
-  return allowHouseProjectSupply !== true || houseProjectId !== undefined
+function supportedHouseSupply({ allowHouseProjectSupply, allowHouseProjectFull, houseProjectId }: MinecraftSurveyWindowInput): boolean {
+  return (allowHouseProjectSupply !== true && allowHouseProjectFull !== true) || houseProjectId !== undefined
 }
 
 export const MinecraftSurveyWindowInputSchema = z.strictObject(windowFields)

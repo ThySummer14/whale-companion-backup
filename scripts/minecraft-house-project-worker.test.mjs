@@ -14,7 +14,7 @@ const signal = new AbortController().signal
 const prefix = '[10:00:01] [Server thread/INFO]: '
 const id = [-1567494946, -1098630553, -1501317838, 1981986780]
 
-function fixture(t, decide = () => 'match') {
+function fixture(t, decide = () => 'match', identityTimeouts = 0) {
   const world = Object.assign(Object.create(CbiWorld.prototype), {
     botName: 'dafeiyu', online: true, connectionEpoch: 3, campPaused: false, campEpoch: 0, features: { houseBuilding: true },
   })
@@ -32,6 +32,10 @@ function fixture(t, decide = () => 'match') {
     assert.match(command, / if loaded /u)
     dispatched.push(command)
     if (command.endsWith(' UUID')) {
+      if (identityTimeouts > 0) {
+        identityTimeouts--
+        throw new Error('console-receipt-timeout:execute')
+      }
       assert.ok(proof.test(prefix + `dafeiyu has the following entity data: [I; ${id.join(', ')}]\n`))
       return prefix + `dafeiyu has the following entity data: [I; ${id.join(', ')}]\n`
     }
@@ -48,35 +52,44 @@ function fixture(t, decide = () => 'match') {
     world.withCampAction(() => world.verifyHouseProject(input, readSignal)) }
 }
 
-test('whole project completion uses one fresh read of all 750 cells including reserved air', async t => {
+test('whole project completion uses fresh chunked reads of all 750 cells including reserved air', async t => {
   const h = fixture(t)
   assert.deepEqual(await h.run(), { matched: true, checked: 750, unmatchedSections: [] })
-  assert.equal(h.dispatched.length, 2)
-  const command = h.dispatched[1]
-  const blocks = [...command.matchAll(/if block (~-?\d*) (~-?\d*) (~-?\d*) ([#:\w]+) /gu)]
+  assert.equal(h.dispatched.length, 7)
+  const blocks = h.dispatched.slice(1).flatMap(command => [...command.matchAll(/if block (~-?\d*) (~-?\d*) (~-?\d*) ([#:\w]+) /gu)])
   assert.equal(blocks.length, 750)
   assert.equal(new Set(blocks.map(([, x, y, z]) => [x, y, z].join(','))).size, 750)
   assert.equal(blocks.filter(([, , , , value]) => value === '#minecraft:air').length, 150)
   assert.equal(blocks.filter(([, , , , value]) => value === 'minecraft:oak_planks').length, 600)
 })
 
+test('late chunk loading gets one fresh identity probe before the same whole-project verification', async t => {
+  const delayed = fixture(t, undefined, 1)
+  assert.deepEqual(await delayed.run(), { matched: true, checked: 750, unmatchedSections: [] })
+  assert.equal(delayed.dispatched.filter(command => command.endsWith(' UUID')).length, 2)
+  const unavailable = fixture(t, undefined, 2)
+  await assert.rejects(unavailable.run(), { message: 'house-project-verification-unconfirmed' })
+  assert.equal(unavailable.dispatched.length, 2)
+})
+
 test('mismatching sections provide bounded diagnostics without a completion', async t => {
   let index = 0
-  const h = fixture(t, count => count === 750 || count === 125 && [0, 5].includes(index++) ? 'missing' : 'match')
+  const h = fixture(t, count => count === 125 && [0, 5].includes(index++) ? 'missing' : 'match')
   assert.deepEqual(await h.run(), { matched: false, checked: 750, unmatchedSections: [0, 5] })
-  assert.equal(h.dispatched.length, 9)
+  assert.equal(h.dispatched.length, 8)
 })
 
 test('separately passing sections never stand in for simultaneous completion', async t => {
-  const h = fixture(t, count => count === 750 ? 'missing' : 'match')
-  await assert.rejects(h.run(), { message: 'house-project-verification-unconfirmed' })
+  let first = true
+  const h = fixture(t, () => { const action = first ? 'missing' : 'match'; first = false; return action })
+  assert.deepEqual(await h.run(), { matched: false, checked: 750, unmatchedSections: [0] })
 })
 
 test('unmatched diagnostics cannot pass after the world or bot changes', async t => {
   const unavailable = fixture(t, () => 'missing')
   await assert.rejects(unavailable.run(), { message: 'house-project-verification-unconfirmed' })
   const changed = fixture(t, (_count, _command, world) => { world.connectionEpoch++; return 'match' })
-  await assert.rejects(changed.run(), { message: 'house-ownership-unconfirmed' })
+  await assert.rejects(changed.run(), { message: 'house-unavailable' })
   const bogus = fixture(t, () => 'fake')
   await assert.rejects(bogus.run(), { message: 'house-project-verification-unconfirmed' })
 })

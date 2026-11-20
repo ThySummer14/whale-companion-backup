@@ -1,0 +1,193 @@
+diff --git a/src/main/java/baritone/server/NightShelterTask.java b/src/main/java/baritone/server/NightShelterTask.java
+--- a/src/main/java/baritone/server/NightShelterTask.java
++++ b/src/main/java/baritone/server/NightShelterTask.java
+@@ -4,12 +4,15 @@
+ import baritone.api.utils.Rotation;
+ import net.minecraft.core.BlockPos;
+ import net.minecraft.core.Direction;
++import net.minecraft.network.chat.Component;
+ import net.minecraft.server.level.ServerLevel;
+ import net.minecraft.server.level.ServerPlayer;
++import net.minecraft.server.players.SleepStatus;
+ import net.minecraft.world.entity.item.ItemEntity;
+ import net.minecraft.world.InteractionHand;
+ import net.minecraft.world.item.BlockItem;
+ import net.minecraft.world.item.Items;
++import net.minecraft.world.level.GameRules;
+ import net.minecraft.world.level.GameType;
+ import net.minecraft.world.level.Level;
+ import net.minecraft.world.level.block.BedBlock;
+@@ -22,10 +25,12 @@
+ import java.util.function.Consumer;
+ import java.util.ArrayList;
+ import java.util.Comparator;
++import java.util.HashSet;
+ 
+ /** A three-block survival shelter. Reuses the existing survival pillar for exit. */
+ public final class NightShelterTask {
+     private static final String TAG = "companion_shelter:";
++    private static final String BED_NOTICE_TAG = "companion_bed_notice:";
+     private final Baritone baritone;
+     private final ServerPlayer player;
+     private final ServerLevel world;
+@@ -55,18 +60,108 @@
+     }
+ 
+     static String sleep(Baritone baritone, BlockPos position) {
++        return useBed(baritone, position).startsWith("sleeping ") ? "sleeping" : "refused";
++    }
++
++    static String useBed(Baritone baritone, BlockPos position) {
+         ServerPlayer player = baritone.getPlayerContext().player();
+         requireSurvival(player);
+         ServerLevel world = player.serverLevel();
+-        if (!world.hasChunkAt(position) || !(world.getBlockState(position).getBlock() instanceof BedBlock)
+-                || !world.mayInteract(player, position)
+-                || !baritone.getFakeInteractionController().canBreakFromHere(position)) {
++        BlockPos head = bedHead(world, position);
++        if (head != null && player.getSleepingPos().filter(head::equals).isPresent()) {
++            return "sleeping " + coordinates(head);
++        }
++        if (!reachableBed(baritone, position, head)) {
+             throw new IllegalArgumentException("night-bed-unreachable");
+         }
+-        if (player.isSleeping()) return "sleeping";
+         baritone.cancelAll();
++        return interactWithBed(baritone, position, head);
++    }
++
++    private static String interactWithBed(Baritone baritone, BlockPos position, BlockPos head) {
++        ServerPlayer player = baritone.getPlayerContext().player();
+         baritone.getFakeInteractionController().interactBlock(position);
+-        return player.isSleeping() ? "sleeping" : "refused";
++        if (player.getSleepingPos().filter(head::equals).isPresent()) return "sleeping " + coordinates(head);
++        if (player.serverLevel().isDay() && head.equals(player.getRespawnPosition())
++                && Level.OVERWORLD.equals(player.getRespawnDimension())) return "spawn-set " + coordinates(head);
++        return "refused";
++    }
++
++    private static BlockPos bedHead(ServerLevel world, BlockPos position) {
++        if (!world.hasChunkAt(position)) return null;
++        var clicked = world.getBlockState(position);
++        if (!(clicked.getBlock() instanceof BedBlock)) return null;
++        if (clicked.getValue(BedBlock.PART) == BedPart.HEAD) return position;
++        BlockPos head = position.relative(clicked.getValue(BedBlock.FACING));
++        if (!world.hasChunkAt(head)) return null;
++        var state = world.getBlockState(head);
++        return state.is(clicked.getBlock()) && state.getValue(BedBlock.PART) == BedPart.HEAD ? head : null;
++    }
++
++    private static boolean reachableBed(Baritone baritone, BlockPos position, BlockPos head) {
++        ServerPlayer player = baritone.getPlayerContext().player();
++        ServerLevel world = player.serverLevel();
++        return head != null && !player.isSleeping() && !player.isShiftKeyDown()
++                && !world.getBlockState(head).getValue(BedBlock.OCCUPIED)
++                && world.mayInteract(player, position) && world.mayInteract(player, head)
++                && baritone.getFakeInteractionController().canBreakFromHere(position);
++    }
++
++    static String autoBed(Baritone baritone, ServerPlayer owner) {
++        ServerPlayer player = baritone.getPlayerContext().player();
++        ServerLevel world = player.serverLevel();
++        if (!drySurvival(player) || owner == null || owner == player || owner.serverLevel() != world
++                || !owner.isAlive()) return "idle";
++        if (player.isSleeping()) {
++            var bed = player.getSleepingPos();
++            return bed.isPresent() && remindAwakeOwner(player, owner) ? "reminded " + coordinates(bed.get()) : "idle";
++        }
++        if (world.isDay() ? player.getRespawnPosition() != null : !world.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT)) {
++            return "idle";
++        }
++        if (baritone.isPathing() || !player.onGround() || player.isUsingItem()
++                || player.getDeltaMovement().horizontalDistanceSqr() > 0.0004D
++                || baritone.getInputController().isEmergencyMovementActive()
++                || baritone.getEmergencyAvoidanceController().activeThreat() != EmergencyAvoidanceController.Threat.NONE) {
++            return "idle";
++        }
++
++        BlockPos origin = player.blockPosition();
++        var nearby = new ArrayList<BlockPos>();
++        for (BlockPos position : BlockPos.betweenClosed(origin.offset(-3, -2, -3), origin.offset(3, 2, 3))) {
++            if (world.hasChunkAt(position) && world.getBlockState(position).getBlock() instanceof BedBlock) {
++                nearby.add(position.immutable());
++            }
++        }
++        nearby.sort(Comparator.comparingDouble(position -> player.distanceToSqr(position.getCenter())));
++        var attempted = new HashSet<BlockPos>();
++        for (BlockPos clicked : nearby) {
++            BlockPos head = bedHead(world, clicked);
++            if (!reachableBed(baritone, clicked, head) || !attempted.add(head)) continue;
++            String result = interactWithBed(baritone, clicked, head);
++            if (result.startsWith("sleeping ")) {
++                baritone.cancelAll();
++                return remindAwakeOwner(player, owner) ? result + " reminded" : result;
++            }
++            if (!result.equals("refused")) return result;
++            if (attempted.size() == 2) break;
++        }
++        return "idle";
++    }
++
++    private static boolean remindAwakeOwner(ServerPlayer sleeper, ServerPlayer owner) {
++        ServerLevel world = sleeper.serverLevel();
++        if (world.isDay() || owner.isSleeping() || owner.isSpectator()
++                || !world.getGameRules().getBoolean(GameRules.RULE_DAYLIGHT)) return false;
++        SleepStatus status = new SleepStatus();
++        status.update(world.players());
++        if (status.areEnoughSleeping(world.getGameRules().getInt(GameRules.RULE_PLAYERS_SLEEPING_PERCENTAGE))) return false;
++        String notice = BED_NOTICE_TAG + Math.floorDiv(world.getDayTime(), 24000L);
++        if (sleeper.getTags().contains(notice) || !sleeper.addTag(notice)) return false;
++        sleeper.getTags().stream().filter(tag -> tag.startsWith(BED_NOTICE_TAG) && !tag.equals(notice))
++                .toList().forEach(sleeper::removeTag);
++        owner.sendSystemMessage(Component.literal("大肥鱼：我已经躺下啦，你也睡一下吧。"));
++        return true;
+     }
+ 
+     static String deployBed(Baritone baritone, BlockPos foot) {
+@@ -176,10 +271,14 @@
+     }
+ 
+     private static void requireSurvival(ServerPlayer player) {
+-        if (!player.isAlive() || !Level.OVERWORLD.equals(player.serverLevel().dimension())
+-                || player.gameMode.getGameModeForPlayer() != GameType.SURVIVAL || player.isInWater()) {
++        if (!drySurvival(player)) {
+             throw new IllegalArgumentException("night-shelter-survival-required");
+         }
++    }
++
++    private static boolean drySurvival(ServerPlayer player) {
++        return player.isAlive() && Level.OVERWORLD.equals(player.serverLevel().dimension())
++                && player.gameMode.getGameModeForPlayer() == GameType.SURVIVAL && !player.isInWater();
+     }
+ 
+     public boolean tick() {
+diff --git a/src/main/java/baritone/server/BasicGoalCommandHandler.java b/src/main/java/baritone/server/BasicGoalCommandHandler.java
+--- a/src/main/java/baritone/server/BasicGoalCommandHandler.java
++++ b/src/main/java/baritone/server/BasicGoalCommandHandler.java
+@@ -2175,6 +2200,7 @@
+             }
+         }
+         reply(fakePlayer, sender, baritone.server.llm.ExternalChatRelay.HELP);
++        reply(fakePlayer, sender, "Companion 床交互: v1");
+         reply(fakePlayer, sender,
+                 "导航: goto, come, y, goal, path, surface, return, survey, surveyroute, surveytrail, campgather, craft, buildcamp, homebuild, homebuildone, homebuildrecover, shield, nightbed, nightshelter, thisway, axis, tunnel");
+         reply(fakePlayer, sender,
+@@ -2189,10 +2215,16 @@
+ 
+     private static void nightShelter(ServerPlayer sender, ServerPlayer player, Baritone baritone, String[] args) {
+         if (sender != player) throw new IllegalArgumentException("night-shelter-bot-only");
+-        if (args[0].equalsIgnoreCase("nightbed") && (args.length == 4 || args.length == 5 && args[1].equals("place"))) {
++        if (args[0].equalsIgnoreCase("nightbed") && args.length == 3 && args[1].equals("auto")) {
++            if (!args[2].matches("[A-Za-z0-9_]{3,16}")) throw new IllegalArgumentException("night-bed-owner-invalid");
++            ServerPlayer owner = player.getServer().getPlayerList().getPlayerByName(args[2]);
++            reply(player, sender, "nightbed " + NightShelterTask.autoBed(baritone, owner));
++        } else if (args[0].equalsIgnoreCase("nightbed") && (args.length == 4
++                || args.length == 5 && (args[1].equals("place") || args[1].equals("use")))) {
+             int start = args.length - 3;
+             BlockPos position = new BlockPos(coordinate(args[start], "x"), coordinate(args[start + 1], "y"), coordinate(args[start + 2], "z"));
+-            String result = start == 1 ? NightShelterTask.sleep(baritone, position) : NightShelterTask.deployBed(baritone, position);
++            String result = start == 1 ? NightShelterTask.sleep(baritone, position)
++                    : args[1].equals("place") ? NightShelterTask.deployBed(baritone, position) : NightShelterTask.useBed(baritone, position);
+             reply(player, sender, "nightbed " + result);
+         } else if (args[0].equalsIgnoreCase("nightshelter") && args.length == 2) {
+             String phase = args[1];

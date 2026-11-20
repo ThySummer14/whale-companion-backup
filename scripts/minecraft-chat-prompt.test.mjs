@@ -5,6 +5,7 @@ import test from 'node:test'
 import { MINECRAFT_OWNER_MESSAGES, minecraftOwnerEventKey, minecraftOwnerEvents, minecraftOwnerMessageText } from '../src/core/minecraft-chat.ts'
 import { CompanionStore } from '../src/core/store.ts'
 import { AutonomyService } from '../src/host/autonomy.ts'
+import { DeviceAuthError } from '../src/host/devices.ts'
 import { MinecraftService } from '../src/host/minecraft.ts'
 import { registerMinecraftChatPrompt } from '../src/host/minecraft-chat-prompt.ts'
 import { registerMinecraftTools } from '../src/host/minecraft-tools.ts'
@@ -21,6 +22,44 @@ function fixture(t, onEvent) {
   t.after(async () => { await service.close(); store.close(); rmSync(dir, { recursive: true, force: true }) })
   return { store, service }
 }
+
+test('Minecraft returns unusable destinations to the role with its actual current position', async t => {
+  const { service, store } = fixture(t)
+  const target = { x: 5935, y: 63, z: -82 }
+  const observation = { position: { x: 5944, y: 66, z: -74 }, online: true }
+  let reason = 'move-target-blocked'
+  const request = t.mock.method(service, 'request', async path => {
+    if (path === '/move') throw new DeviceAuthError(409, reason)
+    assert.equal(path, '/observe')
+    return observation
+  })
+  for (const code of ['move-target-blocked', 'move-target-unsupported', 'move-ended-without-arrival']) {
+    reason = code
+    assert.deepEqual(await service.modelMove(target, new AbortController().signal), { moved: false, reason: code, target, observation })
+  }
+  assert.equal(request.mock.callCount(), 6)
+  assert.deepEqual(store.tasks().filter(task => task.capabilityId === 'minecraft.move').map(task => task.status), ['failed', 'failed', 'failed'])
+})
+
+test('daytime bed use requires a spawn receipt and never writes a sleep claim', async t => {
+  const { service, store } = fixture(t)
+  const target = { x: 4, y: 64, z: -1 }
+  let result = { sleeping: false, spawnSet: true, target }
+  t.mock.method(service, 'request', async (path, method, input) => {
+    assert.equal(path, '/sleep')
+    assert.equal(method, 'POST')
+    assert.deepEqual(input, target)
+    return result
+  })
+  const receipt = await service.sleepInBed(target, new AbortController().signal)
+  assert.deepEqual({ sleeping: receipt.sleeping, spawnSet: receipt.spawnSet, target: receipt.target }, result)
+  assert.equal(store.taskById(receipt.taskId).status, 'succeeded')
+  const [memory] = store.memory.list({ contextId: game, status: 'active' })
+  assert.match(memory.content, /床重生点/u)
+  assert.doesNotMatch(memory.content, /实际入睡/u)
+  result = { sleeping: false, target }
+  assert.deepEqual(await service.sleepInBed(target, new AbortController().signal), { status: 'refused', reason: 'night-bed-use-refused' })
+})
 
 test('game messages keep only bounded owner lines without any implicit worker or archive read', async t => {
   const { service } = fixture(t)

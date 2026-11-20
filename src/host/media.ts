@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import { lstat, mkdir, readdir, realpath, unlink } from 'node:fs/promises'
 import { extname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type { MediaAsset, MediaCleanupPreview, MediaCleanupResult, MediaKind, MediaSummary, MediaView } from '../core/model.ts'
+import { VOXEL_PREPARE_CAPABILITY } from '../core/minecraft-voxel-blueprints.ts'
 import type { CompanionStore } from '../core/store.ts'
 import { DEVICE_FEED_IMAGE_PATH, DEVICE_FEED_IMAGE_SOURCE, SURVEY_CARD_MEDIA_PATH, SURVEY_CARD_MEDIA_SOURCE } from './device-media.ts'
 
@@ -144,9 +145,11 @@ export class MediaService {
       }
       const info = await lstat(file)
       if (!info.isFile() || info.isSymbolicLink()) continue
-      if (path.startsWith('songs/')) {
-        if (asset?.kind === 'song' && asset.source === 'singing' && !asset.deletedAt
-          && asset.hash && info.size === asset.bytes && await this.hashFile(file) === asset.hash) {
+      const song = path.startsWith('songs/')
+      const blueprint = path.startsWith('blueprints/')
+      if (song || blueprint) {
+        const managed = song ? asset?.kind === 'song' && asset.source === 'singing' : asset?.source === VOXEL_PREPARE_CAPABILITY
+        if (managed && asset && !asset.deletedAt && asset.hash && info.size === asset.bytes && await this.hashFile(file) === asset.hash) {
           this.store.media.upsert({ ...asset, lastVerifiedAt: now, missingAt: undefined })
           seen.add(path)
         }

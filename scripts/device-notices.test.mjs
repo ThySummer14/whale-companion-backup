@@ -60,6 +60,8 @@ test('paired notice pages and exact or through acknowledgements are scoped to th
   const phone = await h.pair('Phone')
   assert.deepEqual(await json(await h.get('state', phone)), {
     schemaVersion: 2, pluginVersion: 'fixture', notices: summary(0), chatSend: { version: 1 },
+    houseProjectProgress: { version: 1, items: [] },
+    houseApprovals: { version: 1, items: [], zones: [] }, bilibiliWatch: { version: 1, ready: false, resume: true }, noticeGroups: 1,
   })
   h.addChat('phone-only')
   const tablet = await h.pair('Tablet')
@@ -159,4 +161,16 @@ test('notice read reauthenticates after body upload and a revoked device cannot 
   assert.equal(mark.mock.callCount(), 0)
   assert.equal((await h.get('notices', phone)).status, 401)
   assert.equal((await h.get('state', phone)).status, 401)
+})
+
+test('group read clears only the IDs the paired phone saw', async t => {
+  const h = await fixture(t)
+  const phone = await h.pair('Grouped phone')
+  h.addChat('first grouped')
+  h.addChat('second grouped')
+  const { items } = await json(await h.get('notices', phone))
+  h.addChat('arrived while reading')
+  assert.deepEqual(await json(await h.read({ ids: items.map(item => item.id) }, phone)), summary(1))
+  const after = await json(await h.get('notices', phone))
+  assert.deepEqual(after.items.map(item => item.read), [false, true, true])
 })

@@ -3,22 +3,22 @@ import { MinecraftHouseLayout, MinecraftHousePreview, MinecraftHouseReceipt, Min
 import type { MinecraftAuthorizedZone } from './minecraft-supply.ts'
 
 export const PROJECT_MIN_SECTIONS = 2
-export const PROJECT_MAX_SECTIONS = 6
-export const PROJECT_SECTION_OFFSET_LIMIT = 8
 export const HOUSE_PROJECT_SECTION_CAPABILITY = 'minecraft.house-project.section'
 export const HOUSE_PROJECT_SUPPLY_CAPABILITY = 'minecraft.house-project.supply'
 export const HOUSE_PROJECT_SUPPLY_EVENT = 'world.house-project-supply'
 export const HOUSE_PROJECT_VERIFY_CAPABILITY = 'minecraft.house-project.verify'
+export const HOUSE_PROJECT_VERIFICATION_EVENT = 'world.house-project-verification'
 export const DAILY_HOUSE_PROJECT_TASK_PREFIX = 'minecraft-house-project-daily:'
 
 export interface DailyHouseProjectOffer {
   section: number
   name: string
   recovery?: true
+  fullProject?: true
   supply?: { recipe: 'oak_planks' | 'spruce_planks'; missing: number }
 }
 
-const Offset = z.int().min(-PROJECT_SECTION_OFFSET_LIMIT).max(PROJECT_SECTION_OFFSET_LIMIT)
+const Offset = z.int()
 const SectionLayout = z.strictObject({
   name: z.string().trim().min(1).max(80),
   offset: z.strictObject({ x: Offset, y: Offset, z: Offset }),
@@ -34,7 +34,7 @@ function bounds(center: Position, layout: MinecraftHouseLayout) {
 }
 
 function coversProject(sections: { center: Position; layout: MinecraftHouseLayout }[]) {
-  if (sections.length < PROJECT_MIN_SECTIONS || sections.length > PROJECT_MAX_SECTIONS) return false
+  if (sections.length < PROJECT_MIN_SECTIONS) return false
   if (sections.reduce((total, { layout }) => total + layout.blocks.replaceAll('.', '').length, 0) <= 100) return false
   const boxes = sections.map(({ center, layout }) => bounds(center, layout))
   if (boxes.some((a, i) => boxes.slice(i + 1).some(b => axes.every(k => a.min[k] <= b.max[k] && b.min[k] <= a.max[k])))) return false
@@ -46,21 +46,23 @@ function coversProject(sections: { center: Position; layout: MinecraftHouseLayou
 export const MinecraftHouseProjectInput = z.strictObject({
   name: z.string().trim().min(1).max(80),
   zoneId: z.uuid(),
-  sections: z.array(SectionLayout).min(PROJECT_MIN_SECTIONS).max(PROJECT_MAX_SECTIONS),
+  renovate: z.literal(true).optional(),
+  sections: z.array(SectionLayout).min(PROJECT_MIN_SECTIONS),
 }).refine(({ sections }) => coversProject(sections.map(({ offset, layout }) => ({ center: offset, layout }))),
   'Sections must cover one rectangular volume including air, without overlaps, with more than 100 solid blocks')
 export type MinecraftHouseProjectInput = z.infer<typeof MinecraftHouseProjectInput>
 
 export function minecraftHouseProjectSectionRequest(
   { offset, layout }: Pick<z.infer<typeof SectionLayout>, 'offset' | 'layout'>,
-  zone: z.infer<typeof MinecraftAuthorizedZone>,
+  zone: z.infer<typeof MinecraftAuthorizedZone>, renovate?: boolean,
 ) {
   // The worker uses the child cube for pathing as well as placement.
-  const radius = zone.radius - Math.max(...axes.map(k => Math.abs(offset[k])))
   const center = { x: zone.x + offset.x, y: zone.y + offset.y, z: zone.z + offset.z }
   const box = bounds(center, layout)
-  if (!axes.every(k => box.min[k] >= center[k] - radius && box.max[k] <= center[k] + radius)) return
-  const request = MinecraftHouseRequest.safeParse({ zone: { id: zone.id, dimension: zone.dimension, ...center, radius }, layout })
+  if (!axes.every(k => box.min[k] >= zone[k] - zone.radius && box.max[k] <= zone[k] + zone.radius)) return
+  const radius = Math.max(2, ...axes.map(k => Math.max(Math.abs(box.min[k] - center[k]), Math.abs(box.max[k] - center[k]))))
+  const request = MinecraftHouseRequest.safeParse({ zone: { id: zone.id, dimension: zone.dimension, ...center, radius }, layout,
+    ...(renovate && { replace: true }) })
   return request.success ? request.data : undefined
 }
 
@@ -68,7 +70,7 @@ export function minecraftHouseProjectRequests(project: MinecraftHouseProjectInpu
   if (project.zoneId !== zone.id) return
   const requests: MinecraftHouseRequest[] = []
   for (const section of project.sections) {
-    const request = minecraftHouseProjectSectionRequest(section, zone)
+    const request = minecraftHouseProjectSectionRequest(section, zone, project.renovate)
     if (!request) return
     requests.push(request)
   }
@@ -76,7 +78,7 @@ export function minecraftHouseProjectRequests(project: MinecraftHouseProjectInpu
 }
 
 export const MinecraftHouseProjectVerifyRequest = z.strictObject({
-  sections: z.array(MinecraftHouseRequest).min(PROJECT_MIN_SECTIONS).max(PROJECT_MAX_SECTIONS),
+  sections: z.array(MinecraftHouseRequest).min(PROJECT_MIN_SECTIONS),
 }).refine(({ sections }) => {
   const first = sections[0]?.zone
   if (!first) return false
@@ -87,11 +89,11 @@ export const MinecraftHouseProjectVerifyRequest = z.strictObject({
   }) && coversProject(sections.map(({ zone, layout }) => ({ center: zone, layout })))
 })
 
-const SectionIndex = z.int().min(0).max(PROJECT_MAX_SECTIONS - 1)
+const SectionIndex = z.int().min(0)
 export const MinecraftHouseProjectVerification = z.strictObject({
   matched: z.boolean(),
-  checked: z.int().min(101).max(125 * PROJECT_MAX_SECTIONS),
-  unmatchedSections: z.array(SectionIndex).max(PROJECT_MAX_SECTIONS),
+  checked: z.int().min(101),
+  unmatchedSections: z.array(SectionIndex),
 }).refine(result => result.matched === (result.unmatchedSections.length === 0) &&
   result.unmatchedSections.every((index, i, indices) => i === 0 || index > indices[i - 1]!))
 export type MinecraftHouseProjectVerification = z.infer<typeof MinecraftHouseProjectVerification>
@@ -142,7 +144,7 @@ export function houseProjectPlanMatches(input: HouseProjectPlanInput, options: r
 export const HouseProjectPlan = HouseProjectPlanInput.safeExtend({
   observedAt: z.iso.datetime(),
   recordedAt: z.iso.datetime(),
-  options: z.array(HouseProjectPlanOption).min(1).max(PROJECT_MAX_SECTIONS),
+  options: z.array(HouseProjectPlanOption).min(1),
 }).refine(plan => plan.observedAt <= plan.recordedAt && plan.options.every((item, index, options) =>
   index === 0 || item.section > options[index - 1]!.section) && houseProjectPlanMatches(plan, plan.options))
 export type HouseProjectPlan = z.infer<typeof HouseProjectPlan>
@@ -173,4 +175,19 @@ export type MinecraftHouseProject = Omit<MinecraftHouseProjectInput, 'sections'>
 export interface MinecraftHouseProjectsView {
   available: boolean
   projects: MinecraftHouseProject[]
+}
+
+export interface MinecraftHouseProjectProgress {
+  id: string
+  name: string
+  totalSections: number
+  verifiedSections: number
+  runningSections: number
+  interruptedSections: number
+  lastVerification?: {
+    matched: boolean
+    checked: number
+    unmatchedSections: number
+    checkedAt: string
+  }
 }

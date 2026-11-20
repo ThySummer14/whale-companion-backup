@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { chmodSync, closeSync, constants, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, writeFileSync } from 'node:fs'
+import { mkdir, rm, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, isAbsolute, join } from 'node:path'
 import { createRequire } from 'node:module'
@@ -8,12 +9,12 @@ import { z } from 'zod'
 import { MINECRAFT_OWNER_MESSAGES, minecraftOwnerEventKey, minecraftOwnerEvents, type MinecraftOwnerEvent } from '../core/minecraft-chat.ts'
 import { CAMP_GATHER_MAX_MS, CAMP_VISIT_GATHER_TASK_PREFIX, MinecraftCampGatherOffer, MinecraftCampGatherReceipt, MinecraftCampGatherRequest } from '../core/minecraft-gather.ts'
 import { MinecraftHouseLayout, MinecraftHousePreview, MinecraftHouseReceipt, MinecraftHouseRecovery, MinecraftHouseRequest,
-  minecraftHouseMaterials, minecraftHouseReceiptMatches, minecraftHouseRecoveryDecision,
+  minecraftHouseCells, minecraftHouseMaterials, minecraftHouseReceiptMatches, minecraftHouseRecoveryDecision,
   type MinecraftHouseDraft, type MinecraftHouseMaterial, type MinecraftHouseRevisionInput, type MinecraftHouseSitePreview, type MinecraftHousesView } from '../core/minecraft-house.ts'
 import { MINECRAFT_HOUSE_CAPABILITY, MINECRAFT_HOUSE_EVENT, MINECRAFT_HOUSE_RECOVERY_EVENT,
   MINECRAFT_HOUSE_RECOVERY_PREFIX, minecraftHouseBuildSummary } from '../core/minecraft-house-repository.ts'
 import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY, HOUSE_PROJECT_SUPPLY_CAPABILITY, HOUSE_PROJECT_SUPPLY_EVENT,
-  HOUSE_PROJECT_VERIFY_CAPABILITY, HouseProjectPlan, HouseProjectPlanInput,
+  HOUSE_PROJECT_VERIFICATION_EVENT, HOUSE_PROJECT_VERIFY_CAPABILITY, HouseProjectPlan, HouseProjectPlanInput,
   MinecraftHouseProjectVerification, houseProjectCanRecover, houseProjectPlanMatches, minecraftHouseProjectRequests, type DailyHouseProjectOffer, type HouseProjectPlanObservation,
   type HouseProjectPlanObservationResult, type MinecraftHouseProjectInput, type MinecraftHouseProjectSitePreview,
   type MinecraftHouseProjectsView } from '../core/minecraft-house-project.ts'
@@ -26,6 +27,7 @@ import { MinecraftHouseCellCandidates, MinecraftHouseCellReceipt, MinecraftHouse
   minecraftHouseCellTarget } from '../core/minecraft-house-cell.ts'
 import { HOUSE_COMPLETION_TASK_PREFIX, HouseRecoveryCompletionResult, MinecraftHouseVerification,
   minecraftHouseVerificationMatches } from '../core/minecraft-house-verification.ts'
+import { VoxelWorldReceipt, voxelSiteOrigin, voxelWorldReceiptMatches, type VoxelWorldInput, type VoxelWorldMode } from '../core/minecraft-blueprint-build.ts'
 import { HOUSE_AGENT_RECOVERY_EVENT, HOUSE_AGENT_RECOVERY_PREFIX, HOUSE_CELL_ACTIVITY, HOUSE_CELL_AUDIT_ACTIVITY,
   HOUSE_CELL_AUDIT_PREFIX, HOUSE_CELL_CAPABILITY, HOUSE_CELL_TASK_PREFIX, HOUSE_RECOVERY_PLACEMENT_LIMITS, HOUSE_RECOVERY_TTL_MS,
   HouseRecoveryAgentDecision, HouseRecoveryPlacedCell, type HouseRecoveryObservation, type HouseRecoveryPlacementMode, type HouseRecoverySource } from '../core/minecraft-recovery.ts'
@@ -56,7 +58,7 @@ const CampVisitEnded = z.strictObject({ visitId: CampVisitId, online: z.literal(
 
 type HouseRun = { zoneId: string; controller: AbortController; settled: Promise<void>; dailyTask?: string; dailyAction?: 'house-build' | 'house-supply' }
 type DailyHouseProjectLease = { dailyTaskId: string; onStarted: (task: TaskRecord) => void }
-type DailyHouseProjectOfferSource = { projectId: string; zoneId: string; section: number; recovery: boolean;
+type DailyHouseProjectOfferSource = { projectId: string; zoneId: string; section: number; recovery: boolean; fullProject: boolean;
   supply?: DailyHouseProjectOffer['supply']; epoch: number; generation: number; expiresAt: number }
 
 const CAMP_VISIT_ACTIONS = {
@@ -79,6 +81,7 @@ export interface MinecraftTransportOptions {
   consoleFifo?: string
   offline?: boolean
   voiceDir?: string
+  voxelBuilding?: boolean
 }
 
 interface MinecraftOptions extends MinecraftTransportOptions {
@@ -131,7 +134,7 @@ function inventoryCount(observation: Record<string, unknown>, name: string): num
 }
 
 function gameActionFact(kind: string, result: any): string {
-  if (kind === 'sleep') return '使用了床，服务端确认实际入睡'
+  if (kind === 'sleep') return result?.sleeping === true ? '使用了床，服务端确认实际入睡' : '白天使用了床，服务端确认床重生点'
   if (kind === 'place-bed') return '用背包中的床完成了放置，服务端确认床头坐标'
   if (kind === 'night-cover') return result?.status === 'covered' ? '挖三填一进入了临时掩体，服务端确认泥土封顶'
     : '在天亮后打开临时掩体，用回收的垫脚材料回到地表'
@@ -172,6 +175,8 @@ export class MinecraftService {
   private readonly dailyHouseProjectOffers = new WeakMap<DailyHouseProjectOffer, DailyHouseProjectOfferSource>()
   private houseProjectPlanGeneration = 0
   private houseRun?: HouseRun
+  private voxelRun?: HouseRun
+  private autonomousProjectRun?: { id: string; controller: AbortController; taskId?: string }
   private creativeForBuild = false
   private recoveredHouses = false
   private learningDirty = true
@@ -330,9 +335,10 @@ export class MinecraftService {
     if (!this.ready && !(await this.starting)) throw new Error(this.lastError ?? 'Minecraft worker 尚未就绪')
     if (campEpoch !== undefined) this.assertCampOpen(campEpoch)
     const building = path === '/build' || path === '/build-authorized' || path === '/camp/visit/build'
-    const timeout = AbortSignal.timeout(path === '/dig' || path === '/camp/visit/gather' ? 100_000
-      : path === '/house/build' || path === '/house/recover' ? 450_000
-        : path === '/return' || path === '/night-cover' ? 120_000 : path === '/shield' ? 18_000 : building ? 90_000 : 60_000)
+    const timeout = AbortSignal.timeout(path.startsWith('/blueprint/') ? 165_000 : path === '/dig' || path === '/camp/visit/gather' ? 100_000
+      : path === '/house/build' || path === '/house/recover' || path === '/house/creative-build' ? 450_000
+        : path === '/house/project-verify' ? 180_000
+          : path === '/return' || path === '/night-cover' ? 120_000 : path === '/shield' ? 18_000 : building ? 90_000 : 60_000)
     const response = await fetch(`${this.workerApi}${path}`, {
       method,
       headers: { authorization: `Bearer ${this.token}`, ...(input === undefined ? {} : { 'content-type': 'application/json' }),
@@ -581,6 +587,7 @@ export class MinecraftService {
 
   homeActive(now: number, ignoreRecoveryPlacement = false, ignoreHouseProjectTaskId?: string): boolean {
     return this.ready && !this.closing && this.homeActiveAt !== undefined &&
+      !(ignoreHouseProjectTaskId && this.autonomousProjectRun?.taskId === ignoreHouseProjectTaskId) &&
       !(ignoreRecoveryPlacement && this.homeActiveKind === 'house-cell') &&
       !(ignoreHouseProjectTaskId && this.houseRun?.dailyTask === ignoreHouseProjectTaskId &&
         this.homeActiveKind === this.houseRun.dailyAction) &&
@@ -613,7 +620,7 @@ export class MinecraftService {
       const chatRelay = this.canReceiveChat?.() === true && !this.campControl().pausedAt
       const value = await this.request(`/events?after=${this.cursor}${chatRelay ? '&chatRelay=1' : ''}`)
       if (!isCurrent()) return
-      for (const event of value.items as { seq: number; kind: string; username?: string; message?: string; delivery?: string; action?: string; error?: string; target?: GameLessonTarget; position?: unknown; oxygen?: unknown }[]) {
+      for (const event of value.items as { seq: number; kind: string; username?: string; message?: string; delivery?: string; action?: string; error?: string; reason?: string; target?: GameLessonTarget; position?: unknown; oxygen?: unknown }[]) {
         this.cursor = Math.max(this.cursor, event.seq)
         const privateChat = event.delivery === 'private'
         this.recentEvents.push(privateChat ? { ...event, message: undefined } : event)
@@ -627,7 +634,7 @@ export class MinecraftService {
           this.store.updateCapability('game.minecraft', 'planned', 'Minecraft 已离线')
           this.endFollow('Minecraft 已离线')
         }
-        if (event.kind === 'follow.ended') this.endFollow('跟随目标已离线')
+        if (event.kind === 'follow.ended') this.endFollow(event.reason === 'bed' ? '她已停下跟随并入睡' : '跟随目标已离线')
         if (event.kind === 'chat.received' && event.username?.toLowerCase() === this.options.owner.toLowerCase() && event.message) {
           this.store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft', kind: 'world.chat', summary: privateChat ? '收到一条 Minecraft 私聊' : event.message.slice(0, 240), data: { seq: event.seq, ...(privateChat ? { delivery: 'private' } : {}) } })
           if (!this.campControl().pausedAt) this.onEvent?.({ seq: event.seq, sourceId, username: this.options.owner, message: event.message })
@@ -855,7 +862,9 @@ export class MinecraftService {
       let result = kind === 'stop' ? await this.request(authorized?.path ?? '/stop', 'POST', input, signal)
         : await this.campRequest(authorized?.path ?? `/${kind}`, authorized?.input ?? input, epoch, signal, visitId)
       if (kind === 'chat' && !ChatDelivery.safeParse(result).success) throw new DeviceAuthError(502, 'minecraft-chat-receipt-unconfirmed')
-      if (kind === 'sleep' && result?.sleeping !== true) throw new DeviceAuthError(409, 'night-bed-use-refused')
+      if (kind === 'sleep' && result?.sleeping !== true && (result?.spawnSet !== true || !this.targetOf(result.target))) {
+        throw new DeviceAuthError(409, 'night-bed-use-refused')
+      }
       if (kind === 'place-bed' && (result?.placed !== true || !this.targetOf(result.head))) throw new DeviceAuthError(409, 'night-bed-placement-refused')
       if (kind === 'night-cover' && (!this.targetOf(result?.surface) ||
           (result?.status !== 'covered' && (result?.status !== 'opened' || result.exit?.returned !== true)))) {
@@ -1056,7 +1065,8 @@ export class MinecraftService {
     try {
       return await this.move(input, signal)
     } catch (error) {
-      if (!(error instanceof DeviceAuthError) || !['move-air-falling', 'move-route-diverged', 'move-ended-without-arrival', 'move-timeout', 'unsafe-target'].includes(error.code)) throw error
+      if (!(error instanceof DeviceAuthError) || !['move-air-falling', 'move-route-diverged', 'move-ended-without-arrival', 'move-timeout',
+        'move-target-blocked', 'move-target-unsupported', 'unsafe-target'].includes(error.code)) throw error
       const observation = await this.observe().catch(() => undefined)
       signal.throwIfAborted()
       return { moved: false, reason: error.code, target: input, observation }
@@ -1190,8 +1200,68 @@ export class MinecraftService {
   }
 
   private worldBusy(ownHouseRun?: HouseRun): boolean {
-    return !!this.campControl().pausedAt || !!this.currentBuildZoneId || !!this.houseRun && this.houseRun !== ownHouseRun || this.store.tasks().some(task =>
-      task.capabilityId.startsWith('minecraft.') && task.status === 'running')
+    return !!this.campControl().pausedAt || !!this.currentBuildZoneId || !!this.voxelRun || !!this.houseRun && this.houseRun !== ownHouseRun || this.store.tasks().some(task =>
+      task.id !== this.autonomousProjectRun?.taskId && task.capabilityId.startsWith('minecraft.') && task.status === 'running')
+  }
+
+  get voxelBuildingEnabled(): boolean { return this.options.voxelBuilding === true && !this.options.ovoRoot }
+  get voxelSiteGeneration(): number { return this.houseProjectPlanGeneration }
+
+  async runVoxelSite(mode: VoxelWorldMode, input: VoxelWorldInput, zoneId: string, schematic: Uint8Array,
+    signal: AbortSignal, assertCurrent: () => void, onAdmission?: () => void): Promise<VoxelWorldReceipt> {
+    if (!this.voxelBuildingEnabled) throw new DeviceAuthError(409, 'blueprint-server-unavailable')
+    this.assertCampOpen()
+    if (this.worldBusy() || this.visitActionPermit) throw new DeviceAuthError(409, 'blueprint-world-busy')
+    const epoch = this.campEpoch
+    const generation = this.voxelSiteGeneration
+    const { promise: settled, resolve } = Promise.withResolvers<void>()
+    const run = { zoneId, controller: new AbortController(), settled }
+    const bounded = AbortSignal.any([run.controller.signal, signal])
+    const guard = () => {
+      bounded.throwIfAborted()
+      this.assertCampOpen(epoch)
+      if (generation !== this.voxelSiteGeneration || this.closing || this.voxelRun !== run) throw new DeviceAuthError(409, 'blueprint-operation-changed')
+      const zone = this.store.buildZoneById(zoneId)
+      const origin = zone && voxelSiteOrigin(zone, input.size)
+      if (!origin || zone?.dimension !== input.dimension || origin.x !== input.origin.x || origin.y !== input.origin.y || origin.z !== input.origin.z) {
+        throw new DeviceAuthError(409, 'blueprint-zone-unavailable')
+      }
+      assertCurrent()
+    }
+    this.voxelRun = run
+    const lease = setInterval(() => {
+      try { guard() } catch (error) { run.controller.abort(error) }
+    }, 250)
+    let staged: string | undefined
+    try {
+      guard()
+      const worker = await this.request('', 'GET', undefined, bounded)
+      guard()
+      if (worker?.online !== true || worker.connecting || worker.action || worker.auth?.mode !== 'cbi') throw new DeviceAuthError(409, 'blueprint-bot-unavailable')
+      const directory = join(this.options.serverRoot, 'companion-blueprint-jobs')
+      await mkdir(directory, { recursive: true, mode: 0o700 })
+      const path = join(directory, `${input.operationId}.schem`)
+      await writeFile(path, schematic, { mode: 0o600, flag: 'wx' })
+      staged = path
+      guard()
+      onAdmission?.()
+      const receipt = VoxelWorldReceipt.safeParse(await this.campRequest(`/blueprint/${mode}`, input, epoch, bounded)).data
+      guard()
+      if (!receipt || !voxelWorldReceiptMatches(receipt, input, mode)) throw new DeviceAuthError(502, 'blueprint-receipt-unconfirmed')
+      return receipt
+    } catch (error) {
+      if (run.controller.signal.aborted) {
+        const reason = run.controller.signal.reason
+        if (reason instanceof DeviceAuthError) throw reason
+        throw new DeviceAuthError(409, 'blueprint-stopped')
+      }
+      throw error
+    } finally {
+      clearInterval(lease)
+      if (staged) await rm(staged, { force: true }).catch(() => {})
+      this.voxelRun = undefined
+      resolve()
+    }
   }
 
   private async authorizedZone(zoneId: string, signal: AbortSignal, ...capabilities: ('crafting' | 'campBuilding' | 'campSurvey' | 'houseBuilding' | 'houseCellPlacement' | 'houseProjects' | 'houseRecovery')[]) {
@@ -1501,7 +1571,7 @@ export class MinecraftService {
   async revokeBuildZone(id: string): Promise<boolean> {
     const revoked = this.store.revokeBuildZone(id)
     if (revoked) this.cancelSupply(id, true)
-    if (revoked && (this.currentBuildZoneId === id || this.houseRun?.zoneId === id)) await this.stop(false)
+    if (revoked && (this.currentBuildZoneId === id || this.houseRun?.zoneId === id || this.voxelRun?.zoneId === id)) await this.stop(false)
     return revoked
   }
 
@@ -2203,7 +2273,7 @@ export class MinecraftService {
     return { ...result, previewId }
   }
 
-  async inspectDailyHouseProject(projectId: string, zoneId: string, signal: AbortSignal, allowSupply?: true): Promise<DailyHouseProjectOffer[]> {
+  async inspectDailyHouseProject(projectId: string, zoneId: string, signal: AbortSignal, allowSupply?: true, fullProject?: true): Promise<DailyHouseProjectOffer[]> {
     const project = this.houseProject(projectId)
     if (project.zoneId !== zoneId) throw new DeviceAuthError(409, 'minecraft-house-project-zone-invalid')
     const epoch = this.campEpoch
@@ -2227,8 +2297,15 @@ export class MinecraftService {
     const shortages: { offer: DailyHouseProjectOffer; request: MinecraftHouseSupplyRequest }[] = []
     const register = (offer: DailyHouseProjectOffer) => {
       this.dailyHouseProjectOffers.set(offer, { projectId, zoneId, section: offer.section, recovery: offer.recovery === true,
-        ...(offer.supply && { supply: { ...offer.supply } }), epoch, generation, expiresAt })
+        fullProject: offer.fullProject === true, ...(offer.supply && { supply: { ...offer.supply } }), epoch, generation, expiresAt })
       offers.push(offer)
+    }
+    if (fullProject) {
+      const section = project.sections.findIndex(state => state.status === 'pending' || state.status === 'interrupted')
+      if (section < 0) return []
+      check()
+      register({ section, name: project.sections[section]!.name, fullProject: true })
+      return offers
     }
     for (const [section, state] of project.sections.entries()) {
       if (state.status !== 'pending' && state.status !== 'interrupted') continue
@@ -2283,6 +2360,7 @@ export class MinecraftService {
       if (this.dailyHouseProjectOffers.get(offer) !== source || Date.now() >= source.expiresAt ||
         this.houseProjectPlanGeneration !== source.generation || this.worldBusy() || this.visitActionPermit ||
         this.store.taskByExternalId(externalId) || source.section !== offer.section || source.recovery !== (offer.recovery === true) ||
+        source.fullProject !== (offer.fullProject === true) ||
         source.supply?.recipe !== offer.supply?.recipe || source.supply?.missing !== offer.supply?.missing) throw stale()
       const current = this.houseProjectSection(projectId, source.section)
       if (current.project.zoneId !== zoneId || current.section.name !== offer.name ||
@@ -2291,6 +2369,16 @@ export class MinecraftService {
       return current.project
     }
     return { source, check, daily: { lease, externalId, assertPermit: authorize } }
+  }
+
+  async buildDailyHouseProject(projectId: string, zoneId: string, offer: DailyHouseProjectOffer, signal: AbortSignal,
+    assertPermit: () => void, lease: DailyHouseProjectLease) {
+    const { check, daily } = this.dailyHouseProjectExecution(projectId, zoneId, offer, signal, assertPermit, lease, false)
+    check()
+    const project = await this.autoBuildHouseProject(projectId, signal, daily)
+    const task = this.store.taskByExternalId(daily.externalId)
+    if (!task) throw new DeviceAuthError(502, 'minecraft-house-project-receipt-unconfirmed')
+    return { task, verification: project.verification }
   }
 
   async buildDailyHouseProjectSection(projectId: string, zoneId: string, offer: DailyHouseProjectOffer, signal: AbortSignal,
@@ -2392,13 +2480,28 @@ export class MinecraftService {
 
   private performHouseProjectSection(project: MinecraftHouseProjectInput & { id: string }, index: number, input: MinecraftHouseRequest,
     epoch: number, controller: AbortController, recovery: boolean,
-    daily?: { lease: DailyHouseProjectLease; externalId: string; assertPermit: () => void }) {
+    daily?: { lease: DailyHouseProjectLease; externalId: string; assertPermit: () => void }, creative = false) {
     const { id } = project
     const action = recovery ? '站位恢复' : '施工'
     return this.runHouseProjectAction(project, controller, HOUSE_PROJECT_SECTION_CAPABILITY, `${daily ? '自主' : ''}${action}第 ${index + 1} 区`, async task => {
       daily?.assertPermit()
-      const path = recovery ? '/house/recover' : '/house/build'
-      const receipt = MinecraftHouseReceipt.safeParse(await this.campRequest(path, input, epoch, controller.signal)).data
+      let receipt: MinecraftHouseReceipt | undefined
+      if (creative) {
+        const parts: MinecraftHouseReceipt[] = []
+        for (let y = 0; y < input.layout.height; y++) {
+          const layer = { ...input, zone: { ...input.zone, y: input.zone.y + y }, layout: { ...input.layout, height: 1,
+            blocks: input.layout.blocks.slice(y * input.layout.width * input.layout.depth, (y + 1) * input.layout.width * input.layout.depth) } }
+          const part = MinecraftHouseReceipt.safeParse(await this.campRequest('/house/creative-build', layer, epoch, controller.signal)).data
+          if (!part || !minecraftHouseReceiptMatches(part, layer)) throw new DeviceAuthError(502, 'minecraft-house-receipt-unconfirmed')
+          parts.push(part)
+        }
+        receipt = MinecraftHouseReceipt.parse({ built: true, zoneId: input.zone.id,
+          checked: parts.reduce((total, part) => total + part.checked, 0),
+          placed: parts.reduce((total, part) => total + part.placed, 0), consumed: {}, creative: true })
+      } else {
+        const path = recovery ? '/house/recover' : '/house/build'
+        receipt = MinecraftHouseReceipt.safeParse(await this.campRequest(path, input, epoch, controller.signal)).data
+      }
       if (!receipt || !minecraftHouseReceiptMatches(receipt, input)) {
         throw new DeviceAuthError(502, 'minecraft-house-receipt-unconfirmed')
       }
@@ -2410,10 +2513,10 @@ export class MinecraftService {
           throw new DeviceAuthError(409, 'minecraft-house-cancelled')
         }
         this.store.transitionTask(task.id, 'succeeded')
-        const summary = `${daily ? '自主施工' : '建筑工程'}第 ${index + 1} 区已核对 ${receipt.checked} 处位置，本次放置 ${receipt.placed} 块。`
+        const summary = `「${project.name}」${daily ? '自主施工' : '建筑工程'}第 ${index + 1} 区已核对 ${receipt.checked} 处位置，本次放置 ${receipt.placed} 块。`
         const activityId = this.store.recordActivity({ contextId: 'game.minecraft', taskId: task.id, source: 'game.minecraft',
           kind: 'world.house-project-section', summary,
-          data: { projectId: id, index, ...result, ...(daily && { dailyTaskId: daily.lease.dailyTaskId }) }, status: 'success' })
+          data: { projectId: id, projectName: project.name, index, ...result, ...(daily && { dailyTaskId: daily.lease.dailyTaskId }) }, status: 'success' })
         if (daily && receipt.placed > 0) this.store.memory.create({ kind: 'experience', content: summary,
           contextId: 'game.minecraft', scope: 'shared', status: 'active', confidence: 1, importance: 0.65,
           sourceRefs: [{ contextId: 'game.minecraft', taskId: task.id, activityId }], actorSessionId: task.sessionId,
@@ -2423,9 +2526,63 @@ export class MinecraftService {
     (taskId, reason) => this.store.minecraftHouseProjects.finish(id, index, taskId, { reason }), daily)
   }
 
-  async verifyHouseProject(id: string) {
+  async autoBuildHouseProject(id: string, callerSignal?: AbortSignal,
+    daily?: { lease: DailyHouseProjectLease; externalId: string; assertPermit: () => void }) {
+    if (this.autonomousProjectRun) throw new DeviceAuthError(409, 'minecraft-house-project-busy')
+    const controller = new AbortController()
+    const signal = AbortSignal.any([controller.signal, callerSignal ?? new AbortController().signal])
     const project = this.houseProject(id)
-    if (project.sections.some(section => section.status !== 'built')) throw new DeviceAuthError(409, 'minecraft-house-project-incomplete')
+    this.autonomousProjectRun = { id, controller }
+    const binding = this.store.bindingByContext('game.minecraft')
+    daily?.assertPermit()
+    const task = this.store.createTask({ capabilityId: 'minecraft.house-project.autonomous', contextId: 'game.minecraft',
+      sessionId: binding?.sessionId, title: `Minecraft 全程自主建造：${project.name}`, ...(daily && { externalId: daily.externalId }) })
+    this.autonomousProjectRun.taskId = task.id
+    this.store.transitionTask(task.id, 'running')
+    try {
+      daily?.lease.onStarted(task)
+      if (project.sections.some(section => section.status !== 'built')) {
+        const zone = this.store.buildZoneById(project.zoneId)
+        if (!zone) throw new DeviceAuthError(404, 'build-zone-not-found')
+        daily?.assertPermit()
+        this.markCreativeForBuild()
+        await this.setGameMode('creative', signal)
+        await this.campRequest('/teleport', { x: zone.x, y: zone.y, z: zone.z }, this.campEpoch, signal)
+        if (this.houseProject(id).sections.some(section => section.status === 'built')) await this.verifyHouseProject(id, true)
+      }
+      for (const [index] of this.houseProject(id).sections.entries()) {
+        const current = this.houseProject(id)
+        if (current.sections[index]!.status === 'built') continue
+        daily?.assertPermit()
+        const input = (await this.houseProjectInputs(current, signal))[index]!
+        await this.performHouseProjectSection(current, index, input, this.campEpoch, controller, false, undefined, true)
+      }
+      daily?.assertPermit()
+      const result = await this.verifyHouseProject(id)
+      if (!result.verification?.matched) throw new DeviceAuthError(502, 'minecraft-house-project-verification-unconfirmed')
+      this.store.transaction(() => {
+        daily?.assertPermit()
+        this.store.transitionTask(task.id, 'succeeded')
+        if (daily) this.store.recordActivity({ contextId: 'game.minecraft', sessionId: task.sessionId, taskId: task.id,
+          source: 'game.minecraft', kind: HOUSE_PROJECT_VERIFICATION_EVENT,
+          summary: `自主完成整栋工程「${project.name}」，整体验收核对 ${result.verification!.checked} 处方块和留空。`,
+          data: { projectId: id, projectName: project.name, ...result.verification, dailyTaskId: daily.lease.dailyTaskId }, status: 'success' })
+      })
+      return result
+    } catch (error) {
+      this.store.transitionTask(task.id, signal.aborted ? 'cancelled' : 'failed', error instanceof DeviceAuthError ? error.code : undefined)
+      throw error
+    } finally {
+      this.autonomousProjectRun = undefined
+      this.creativeForBuild = false
+      await this.setGameMode('survival').catch(() => {})
+    }
+  }
+
+  async verifyHouseProject(id: string, recheck = false) {
+    const project = this.houseProject(id)
+    if (!recheck && project.sections.some(section => section.status !== 'built')) throw new DeviceAuthError(409, 'minecraft-house-project-incomplete')
+    if (recheck && project.sections.some(section => section.status === 'running')) throw new DeviceAuthError(409, 'minecraft-house-project-busy')
     const epoch = this.campEpoch
     const controller = new AbortController()
     const sections = await this.houseProjectInputs(project, controller.signal)
@@ -2441,12 +2598,13 @@ export class MinecraftService {
       this.store.transaction(() => {
         this.assertHouseProjectAction(id, controller.signal, task.id)
         const first = this.store.minecraftHouseProjects.verify(id, { ...result, checkedAt: new Date().toISOString() })
+        const invalidated = this.store.minecraftHouseProjects.invalidateUnmatched(id, result.unmatchedSections)
         this.store.transitionTask(task.id, 'succeeded')
         const summary = result.matched
-          ? `在主人授权区完成了 ${sections.length} 区建筑，整体验收核对 ${result.checked} 处方块和留空。`
-          : `建筑工程有 ${result.unmatchedSections.length} 个分区与蓝图不符。`
+          ? `在主人授权区完成了 ${sections.length} 区建筑「${project.name}」，整体验收核对 ${result.checked} 处方块和留空。`
+          : `建筑工程「${project.name}」有 ${result.unmatchedSections.length} 个分区与蓝图不符。${invalidated ? `已将 ${invalidated} 个旧分段标为待续建。` : ''}`
         const activityId = this.store.recordActivity({ contextId: 'game.minecraft', sessionId: task.sessionId, taskId: task.id,
-          source: 'game.minecraft', kind: 'world.house-project-verification', summary, data: { projectId: id, ...result },
+          source: 'game.minecraft', kind: HOUSE_PROJECT_VERIFICATION_EVENT, summary, data: { projectId: id, projectName: project.name, ...result },
           status: result.matched ? 'success' : 'warning' })
         if (first) this.store.memory.create({ kind: 'experience', content: summary, contextId: 'game.minecraft', scope: 'shared',
           status: 'active', confidence: 1, importance: 0.7, sourceRefs: [{ contextId: 'game.minecraft', taskId: task.id, activityId }],
@@ -2499,6 +2657,10 @@ export class MinecraftService {
       throw error
     } finally {
       this.houseRun = undefined
+      if (this.creativeForBuild && !this.autonomousProjectRun) {
+        this.creativeForBuild = false
+        await this.setGameMode('survival').catch(() => {})
+      }
       resolve()
     }
   }
@@ -2601,6 +2763,7 @@ export class MinecraftService {
   async stop(explicit = true, campPause = false): Promise<{ task: TaskRecord; result: unknown }> {
     this.houseProjectPlanGeneration++
     this.houseRun?.controller.abort()
+    this.voxelRun?.controller.abort()
     this.housePreviews.clear()
     this.houseProjectPreviews.clear()
     this.visitActionPermit = undefined
@@ -2683,7 +2846,9 @@ export class MinecraftService {
     this.closing = true
     this.houseProjectPlanGeneration++
     const houseRun = this.houseRun
+    const voxelRun = this.voxelRun
     houseRun?.controller.abort()
+    voxelRun?.controller.abort()
     this.housePreviews.clear()
     this.houseProjectPreviews.clear()
     this.visitActionPermit = undefined
@@ -2703,7 +2868,7 @@ export class MinecraftService {
       if (!exited) child.kill('SIGKILL')
     }
     this.ready = false
-    await Promise.allSettled([this.campPause, this.campResume, houseRun?.settled])
+    await Promise.allSettled([this.campPause, this.campResume, houseRun?.settled, voxelRun?.settled])
     this.endFollow('Minecraft worker 已停止')
     this.store.updateCapability('game.minecraft', 'planned', 'Minecraft worker 已停止')
   }

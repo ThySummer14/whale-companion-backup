@@ -1,24 +1,20 @@
 import { z } from 'zod'
-import { HOUSE_SECTION_CAPACITY, MINECRAFT_HOUSE_MAX_SIDE, MINECRAFT_HOUSE_SYMBOLS,
+import { HOUSE_SECTION_CAPACITY, MINECRAFT_HOUSE_SYMBOLS,
   type MinecraftHouseSymbol } from './minecraft-house.ts'
-import { MinecraftHouseProjectInput, PROJECT_MAX_SECTIONS, PROJECT_SECTION_OFFSET_LIMIT,
-  minecraftHouseProjectSectionRequest } from './minecraft-house-project.ts'
+import { MinecraftHouseProjectInput, minecraftHouseProjectSectionRequest } from './minecraft-house-project.ts'
 import type { MinecraftAuthorizedZone } from './minecraft-supply.ts'
 
-const MAX_CELLS = 750
 const SECTION_SIDE = 5
-const MAX_SOLIDS = HOUSE_SECTION_CAPACITY * PROJECT_MAX_SECTIONS
-const Side = z.int().min(1).max(2 * PROJECT_SECTION_OFFSET_LIMIT + 1)
+const Side = z.int().min(1)
 const WholeLayout = z.strictObject({
   width: Side,
   height: Side,
   depth: Side,
-  blocks: z.string().min(1).max(MAX_CELLS).regex(MINECRAFT_HOUSE_SYMBOLS),
+  blocks: z.string().min(1).regex(MINECRAFT_HOUSE_SYMBOLS),
 }).refine(({ width, height, depth, blocks }) => {
   if (blocks.length !== width * height * depth) return false
-  const solid = blocks.replaceAll('.', '').length
-  return solid > HOUSE_SECTION_CAPACITY && solid <= MAX_SOLIDS
-}, 'Layout must cover its full volume with 101–600 solid blocks')
+  return blocks.replaceAll('.', '').length > HOUSE_SECTION_CAPACITY
+}, 'Layout must cover its full volume with more than 100 solid blocks')
 
 export const MinecraftHouseProjectImportInput = z.strictObject({
   name: MinecraftHouseProjectInput.shape.name,
@@ -94,12 +90,11 @@ function partition(layout: WholeLayout, solidIn: ReturnType<typeof countSolidIn>
   function findBest(box: Box): Box[] | null {
     const solid = solidIn(box)
     const minimum = lowerBound(box, solid)
-    if (!solid || minimum > PROJECT_MAX_SECTIONS) return null
-    const sectionLimit = Math.min(PROJECT_MAX_SECTIONS, solid)
+    if (!solid) return null
+    const sectionLimit = solid
     if (minimum === 1) {
       const candidate = sectionLayout(box, layout)
-      if (axes.every(axis => Math.abs(candidate.offset[axis]) <= PROJECT_SECTION_OFFSET_LIMIT) &&
-        (!zone || minecraftHouseProjectSectionRequest(candidate, zone))) return [box]
+      if (!zone || minecraftHouseProjectSectionRequest(candidate, zone)) return [box]
     }
 
     let best: Box[] | null = null

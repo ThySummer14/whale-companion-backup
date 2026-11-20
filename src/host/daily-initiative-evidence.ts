@@ -1,5 +1,6 @@
 import { z } from 'zod'
-import { DailyInitiativeAttemptWorld, DailyInitiativeEvidence, DailyInitiativeRecord, type DailyInitiativeSelfNoteSource, type PendingDailyGoal } from '../core/daily-initiative.ts'
+import { DailyInitiativeAttemptWorld, DailyInitiativeEvidence, DailyInitiativeOutcome, DailyInitiativeRecord,
+  DailyInitiativeSelectionReceipt, type DailyInitiativeSelfNoteSource, type PendingDailyGoal } from '../core/daily-initiative.ts'
 import { DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, SELF_NOTE_TRAIT_LABELS, type AutonomousJob } from '../core/model.ts'
 import { DailyHouseSupplySelection, dailyHouseSupplyOption, verifiedDailyHouseSupply } from '../core/daily-house-project-proof.ts'
 import type { CompanionStore } from '../core/store.ts'
@@ -77,36 +78,50 @@ function unconfirmedAttempt(job: AutonomousJob, option: string): PendingDailyGoa
         (option === 'patrol' || option === 'gather') && option === choice)) return world
 }
 
-type PendingGoalStore = Pick<CompanionStore, 'taskById' | 'activityByTask'> & {
-  autonomy: Pick<CompanionStore['autonomy'], 'recentInitiativeJobs'>
+type PendingGoalStore = Parameters<typeof verifiedDailyReflectionSource>[0]
+type PendingGoalState = Omit<PendingDailyGoal, 'lastConfirmedStep'> & {
+  step?: { job: AutonomousJob; summary: string }
 }
 
 export function pendingDailyGoals(store: PendingGoalStore, date: string, now: number): PendingDailyGoal[] {
-  const pending = new Map<string, PendingDailyGoal>()
+  const pending = new Map<string, PendingGoalState>()
   const jobs = store.autonomy.recentInitiativeJobs(date, new Date(now - DEFERRED_GOAL_TTL_MS).toISOString(), new Date(now).toISOString())
   for (const job of jobs) {
     const record = DailyInitiativeRecord.safeParse(job.payload.initiative).data
     if (!record) continue
     const deferred = record.option === 'defer' && job.task.status === 'cancelled'
     const abandoned = record.option === 'abandon' && job.task.status === 'cancelled'
-    const supplied = job.task.status === 'succeeded' && record.option.startsWith('house-supply:') && !!verifiedDailyHouseSupply(store, job)
-    const executed = record.option !== 'defer' && record.option !== 'abandon' &&
-      !record.option.startsWith('house-supply:') && job.task.status === 'succeeded'
-    const lastUnconfirmedWorld = unconfirmedAttempt(job, record.option)
-    if (!deferred && !abandoned && !executed && !supplied && !lastUnconfirmedWorld) continue
     const previous = record.previous
     const original = previous && pending.get(previous.taskId)
     if (previous && (!original || original.goal !== previous.goal || original.expiresAt !== previous.expiresAt ||
         abandoned && record.goal !== original.goal)) continue
+    const succeeded = job.task.status === 'succeeded'
+    const isSupply = record.option.startsWith('house-supply:')
+    const supplied = succeeded && isSupply && !!verifiedDailyHouseSupply(store, job)
+    const keepOpen = 'keepGoalOpen' in record && record.keepGoalOpen === true
+    const summary = succeeded ? DailyInitiativeOutcome.safeParse(job.payload.initiativeOutcome).data : undefined
+    const confirmed = summary && DailyInitiativeSelectionReceipt.safeParse(job.payload.initiativeReceipt).success ? { job, summary } : undefined
+    // Older goal histories can finish as before. A goal with recorded progress requires a confirmed outcome to advance or finish.
+    const executed = succeeded && record.option !== 'defer' && record.option !== 'abandon' && !isSupply &&
+      (!!confirmed || !keepOpen && !original?.step)
+    const advanced = executed && keepOpen
+    const lastUnconfirmedWorld = unconfirmedAttempt(job, record.option)
+    if (!deferred && !abandoned && !executed && !supplied && !lastUnconfirmedWorld) continue
     if (original) pending.delete(original.taskId)
     if (lastUnconfirmedWorld && original) {
       pending.set(original.taskId, { ...original, lastUnconfirmedWorld })
-    } else if (deferred || supplied || lastUnconfirmedWorld) {
+    } else if (deferred || supplied || advanced || lastUnconfirmedWorld) {
       const expiresAt = original?.expiresAt ?? Date.parse(job.task.createdAt) + DEFERRED_GOAL_TTL_MS
-      const unconfirmedWorld = supplied ? undefined : lastUnconfirmedWorld ?? original?.lastUnconfirmedWorld
+      const completedStep = supplied || advanced
+      const step = (completedStep ? confirmed : undefined) ?? original?.step
+      const unconfirmedWorld = completedStep ? undefined : lastUnconfirmedWorld ?? original?.lastUnconfirmedWorld
       if (expiresAt > now) pending.set(job.id, { taskId: job.id, goal: record.goal, expiresAt,
+        ...(step && { step }),
         ...(unconfirmedWorld && { lastUnconfirmedWorld: unconfirmedWorld }) })
     }
   }
-  return Array.from(pending.values()).reverse().slice(0, PENDING_GOAL_LIMIT)
+  return Array.from(pending.values()).reverse().slice(0, PENDING_GOAL_LIMIT).map(({ step, ...goal }) => {
+    if (!step || step.job.payload.choice === 'bilibili' && !verifiedDailyReflectionSource(store, step.job.id)) return goal
+    return { ...goal, lastConfirmedStep: { at: step.job.task.updatedAt, summary: step.summary } }
+  })
 }

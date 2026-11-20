@@ -98,7 +98,7 @@ function fixture(t, expectedLayout = layout) {
     for (const point of selectedIndex === undefined ? points : [points[selectedIndex]]) {
       if (point.block === 'air' || blocks.get(point.key) === point.block) continue
       blocks.set(point.key, point.block)
-      inventory[point.block]--
+      if (!world.creative) inventory[point.block]--
       placed++
     }
     behavior.afterBuild?.()
@@ -424,6 +424,25 @@ test('only missing cells debit their own materials and retry places zero', async
   assert.equal(events.filter(event => event.event === 'action.finished' && event.kind === 'house-build').length, 2)
 })
 
+test('creative builds and cell placements need no stock and leave inventory unchanged', async t => {
+  const { world, blocks, inventory } = fixture(t)
+  world.creative = true
+  for (const material of Object.keys(inventory)) inventory[material] = 0
+  assert.deepEqual(await world.withCampAction(() => world.buildHouse(request, signal())), {
+    built: true, zoneId: zone.id, checked: 8, placed: 4, consumed: {}, creative: true,
+  })
+  assert.equal(blocks.size, 4)
+  assert.deepEqual(inventory, { oak_planks: 0, spruce_planks: 0, cobblestone: 0, glass: 0 })
+
+  const cell = fixture(t)
+  cell.world.creative = true
+  cell.inventory.cobblestone = 0
+  assert.deepEqual(await cell.world.withCampAction(() => cell.world.placeHouseCell({ ...request, index: 1 }, signal())), {
+    outcome: 'placed', index: 1, material: 'cobblestone', consumed: 0, creative: true,
+  })
+  assert.equal(cell.inventory.cobblestone, 0)
+})
+
 test('recovery verifies the actual return, exact new debit and full final footprint independently', async t => {
   const { world, behavior, blocks, inventory, events } = fixture(t)
   world.features.houseRecovery = true
@@ -565,6 +584,8 @@ test('single-cell requests and receipts bind an exact solid blueprint index and 
   const receipt = { outcome: 'placed', index: 1, material: 'cobblestone', consumed: 1 }
   assert.equal(MinecraftHouseCellReceipt.safeParse(receipt).success, true)
   assert.equal(MinecraftHouseCellReceipt.safeParse({ ...receipt, consumed: 0 }).success, false)
+  assert.equal(MinecraftHouseCellReceipt.safeParse({ ...receipt, consumed: 0, creative: true }).success, true)
+  assert.equal(MinecraftHouseCellReceipt.safeParse({ ...receipt, creative: true }).success, false)
   assert.equal(MinecraftHouseCellReceipt.safeParse({ ...receipt, outcome: 'already-present' }).success, false)
   assert.equal(MinecraftHouseCellReceipt.safeParse({ ...receipt, outcome: 'blocked', consumed: 0, reason: 'arbitrary' }).success, false)
   assert.equal(minecraftHouseCellMatches(receipt, valid), true)
@@ -671,4 +692,127 @@ test('an interrupted or displaced single-cell run cannot confirm placement', asy
       assert.deepEqual(h.behavior.operations.filter(item => item.operation === 'cancel'), [{ operation: 'cancel', id: run.id }])
     }
   })
+})
+
+
+test('creative support placement fills only air or water and confirms every written block', async t => {
+  const world = Object.assign(Object.create(CbiWorld.prototype), { creative: true, botName: 'dafeiyu' })
+  const writes = []
+  const placed = new Set()
+  t.mock.method(world, 'startAction', async () => ({ controller: new AbortController() }))
+  t.mock.method(world, 'record', () => {})
+  t.mock.method(world, 'block', async (position, expected) => {
+    const key = [position.x, position.y, position.z].join(',')
+    if (expected === '#minecraft:air') return !placed.has(key)
+    if (expected === 'minecraft:water') return false
+    return placed.has(key) && expected === 'minecraft:oak_planks'
+  })
+  t.mock.method(world, 'writeConsole', async (command, guard) => {
+    guard?.()
+    writes.push(command)
+    const [, x, y, z] = command.split(' ')
+    placed.add([x, y, z].join(','))
+  })
+  const result = await world.supportHouse({ zone, positions: [
+    { x: -12, y: 69, z: 32 }, { x: -11, y: 69, z: 32 },
+  ], material: 'oak_planks' }, signal())
+  assert.deepEqual(result, { placed: 2, checked: 2 })
+  assert.deepEqual(writes, [
+    'setblock -12 69 32 minecraft:oak_planks',
+    'setblock -11 69 32 minecraft:oak_planks',
+  ])
+})
+
+
+test('creative blueprint generation places every missing block and defers lanterns for support', async t => {
+  const world = Object.assign(Object.create(CbiWorld.prototype), { creative: true, botName: 'dafeiyu' })
+  const writes = []
+  const placed = new Map()
+  t.mock.method(world, 'startAction', async () => ({ controller: new AbortController() }))
+  t.mock.method(world, 'record', () => {})
+  t.mock.method(world, 'block', async (position, expected) => {
+    const key = [position.x, position.y, position.z].join(',')
+    if (expected === '#minecraft:air') return !placed.has(key)
+    if (expected === 'minecraft:water') return false
+    return placed.get(key) === expected
+  })
+  t.mock.method(world, 'writeConsole', async (command, guard) => {
+    guard?.()
+    writes.push(command)
+    const [, x, y, z, block] = command.split(' ')
+    placed.set([x, y, z].join(','), block)
+  })
+  t.mock.method(world, 'readHouseLayout', async () => ({}))
+  const creativeLayout = { width: 1, height: 3, depth: 1, blocks: 'yle' }
+  const result = await world.buildHouseCreative({ zone, layout: creativeLayout }, signal())
+  assert.deepEqual(result, { built: true, zoneId: zone.id, checked: 3, placed: 3, consumed: {}, creative: true })
+  assert.equal(writes[0], 'setblock -12 70 32 minecraft:smooth_sandstone')
+  assert.equal(writes[1], 'setblock -12 72 32 minecraft:cherry_leaves[persistent=true]')
+  assert.equal(writes[2], 'setblock -12 71 32 minecraft:lantern')
+})
+
+test('creative renovation replaces mismatched solids, reserved air and directional blocks', async t => {
+  const world = Object.assign(Object.create(CbiWorld.prototype), { creative: true, botName: 'dafeiyu' })
+  const writes = []
+  const placed = new Map([
+    ['-12,70,32', 'minecraft:dark_oak_planks'],
+    ['-12,71,32', 'minecraft:stone'],
+    ['-12,72,32', 'minecraft:cherry_planks'],
+  ])
+  t.mock.method(world, 'startAction', async () => ({ controller: new AbortController() }))
+  t.mock.method(world, 'block', async (position, expected) => placed.get([position.x, position.y, position.z].join(',')) === expected)
+  t.mock.method(world, 'writeConsole', async (command, guard) => {
+    guard?.()
+    writes.push(command)
+    const [, x, y, z, block] = command.split(' ')
+    placed.set([x, y, z].join(','), block)
+  })
+  t.mock.method(world, 'readHouseLayout', async () => ({}))
+  const result = await world.buildHouseCreative({ zone, layout: { width: 1, height: 3, depth: 1, blocks: 'A.K' }, replace: true }, signal())
+  assert.deepEqual(result, { built: true, zoneId: zone.id, checked: 3, placed: 3, consumed: {}, creative: true })
+  assert.deepEqual(writes, [
+    'setblock -12 70 32 minecraft:magenta_terracotta',
+    'setblock -12 71 32 minecraft:air',
+    'setblock -12 72 32 minecraft:brick_stairs[facing=south,half=bottom]',
+  ])
+})
+
+test('project verification checks 2000 cells in bounded chunks with directional materials', async t => {
+  const world = Object.assign(Object.create(CbiWorld.prototype), {
+    online: true, campPaused: false, campEpoch: 0, connectionEpoch: 5, botName: 'dafeiyu', features: { houseBuilding: true },
+  })
+  t.mock.method(world, 'captureHouseSession', async () => ({ epoch: world.connectionEpoch, dev: 1, ino: 2, offset: 0 }))
+  t.mock.method(world, 'verifyHouseSession', async () => {})
+  const sizes = []
+  t.mock.method(world, 'send', async (command, completion, _timeout, _settle, _signal, guard) => {
+    guard?.()
+    if (command.endsWith(' run data get entity @s UUID')) {
+      const output = '[10:00:01] [Server thread/INFO]: dafeiyu has the following entity data: [I; -1, 2, 3, 4]\n'
+      assert.ok(completion.test(output))
+      return output
+    }
+    const [prefix, scale] = command.split(' run data get entity @s UUID[3] ')
+    const conditions = prefix.split(' if block ').slice(1)
+    sizes.push(conditions.length)
+    for (const condition of conditions) {
+      const [x, y, z, material] = condition.split(' ')
+      assert.ok(y === '~' || y.startsWith('~'))
+      assert.equal(material, Number(x.slice(1)) < 5 ? 'minecraft:magenta_terracotta' : 'minecraft:birch_planks')
+      assert.ok(Number.isInteger(Number(z.slice(1))))
+    }
+    const nonce = Math.floor(Number(scale) * 4)
+    const output = `[10:00:01] [Server thread/INFO]: UUID[3] on dafeiyu after scale factor of 1.00 is ${nonce}\n`
+    assert.ok(completion.test(output))
+    return output
+  })
+  const first = { ...zone, x: 0, y: 65, z: 0, radius: 9 }
+  const second = { ...zone, x: 10, y: 65, z: 0, radius: 9 }
+  const sections = [
+    { zone: first, layout: { width: 10, height: 10, depth: 10, blocks: 'A'.repeat(1000) } },
+    { zone: second, layout: { width: 10, height: 10, depth: 10, blocks: 'H'.repeat(1000) } },
+  ]
+  const result = await world.withCampAction(() => world.verifyHouseProject({ sections }, signal()))
+  assert.deepEqual(result, { matched: true, checked: 2000, unmatchedSections: [] })
+  assert.ok(sizes.length > 10)
+  assert.ok(Math.max(...sizes) <= 192)
 })

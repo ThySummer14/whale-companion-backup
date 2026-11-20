@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { minecraftHouseReceiptMatches } from '../core/minecraft-house.ts'
 import { MINECRAFT_HOUSE_CAPABILITY, MINECRAFT_HOUSE_EVENT, minecraftHouseBuildSummary } from '../core/minecraft-house-repository.ts'
+import { minecraftHouseProjectShareMoment } from '../core/minecraft-milestone-share.ts'
 import type { CompanionStore } from '../core/store.ts'
 import { campProject } from './minecraft-camp-project.ts'
 
@@ -70,4 +71,16 @@ export function recentMinecraftMilestones(store: MilestoneStore, since: number):
   const houses = store.minecraftHouses.recentBuildTasks(new Date(since).toISOString())
   return [...(camp ? [camp] : []), ...houses.flatMap(taskId => verifiedMinecraftMilestone(store, 'house', taskId) ?? [])]
     .filter(source => Date.parse(source.at) >= since).sort((a, b) => b.at.localeCompare(a.at))
+}
+
+type ProjectShareStore = Pick<CompanionStore, 'minecraftHouseProjects'>
+
+export function verifiedMinecraftHouseProjectShare(store: ProjectShareStore, taskId: string) {
+  const proof = store.minecraftHouseProjects.verifiedCompletion(taskId)
+  return proof && { at: proof.at, moment: minecraftHouseProjectShareMoment(taskId, proof) }
+}
+
+export function recentMinecraftHouseProjectShares(store: ProjectShareStore, since: number) {
+  return store.minecraftHouseProjects.recentVerificationTasks(new Date(since).toISOString())
+    .flatMap(taskId => verifiedMinecraftHouseProjectShare(store, taskId) ?? [])
 }

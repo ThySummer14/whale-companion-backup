@@ -42,7 +42,12 @@ function verifyRoundTrip(input, area = zone) {
   for (const { layout, zone: child } of requests) {
     assert.equal(child.dimension, area.dimension)
     assert.equal(child.id, area.id)
-    assert.ok(Math.max(Math.abs(child.x - area.x), Math.abs(child.y - area.y), Math.abs(child.z - area.z)) + child.radius <= area.radius)
+    const min = { x: child.x - Math.floor(layout.width / 2), y: child.y, z: child.z - Math.floor(layout.depth / 2) }
+    const max = { x: min.x + layout.width - 1, y: min.y + layout.height - 1, z: min.z + layout.depth - 1 }
+    for (const axis of ['x', 'y', 'z']) {
+      assert.ok(min[axis] >= area[axis] - area.radius && max[axis] <= area[axis] + area.radius)
+    }
+    assert.ok(child.radius >= Math.max(2, Math.floor(layout.width / 2), layout.height - 1, Math.floor(layout.depth / 2)))
     assert.ok(layout.width <= 5 && layout.depth <= 5 && layout.height <= 5)
     assert.ok(layout.blocks.replaceAll('.', '').length >= 1 && layout.blocks.replaceAll('.', '').length <= 100)
     const childWest = child.x - Math.floor(layout.width / 2) - west
@@ -109,11 +114,35 @@ test('six sections retain all 600 solid blocks at the maximum density', () => {
   assert.equal(plan.placed, 600)
 })
 
-test('the 750-position format limit does not override a child section stance limit', () => {
+test('a two-storey nine by seven by eight blueprint retains every cell in eight sections', () => {
+  const input = whole(9, 7, 8, (x, y, z) => {
+    const edge = x === 0 || x === 8 || z === 0 || z === 6
+    const corner = x === 0 && z === 0 || x === 0 && z === 6 || x === 8 && z === 0 || x === 8 && z === 6
+    if (y === 0 || y === 3) return 'y'
+    if (y === 6) return 'd'
+    if (y === 7) return edge ? 'e' : '.'
+    if ([1, 2, 4, 5].includes(y)) {
+      if (z === 0 && x === 4 && (y === 1 || y === 2 || y === 4)) return y === 4 ? 'l' : '.'
+      if (corner) return 'p'
+      if (edge) return (y === 2 || y === 5) && (x === 2 || x === 6 || z === 2 || z === 4) ? 'g' : 'k'
+    }
+    return '.'
+  })
+  const plan = verifyRoundTrip(input)
+  assert.equal(plan.project.sections.length, 8)
+  assert.equal(plan.checked, 504)
+  assert.equal(plan.placed, 327)
+  assert.ok(plan.project.sections.some(section => section.offset.y === 4))
+  assert.equal(input.layout.blocks[1 * 7 * 9 + 0 * 9 + 4], '.')
+  assert.equal(input.layout.blocks[2 * 7 * 9 + 0 * 9 + 4], '.')
+  assert.equal(input.layout.blocks[4 * 7 * 9 + 0 * 9 + 4], 'l')
+})
+
+test('750 positions retain the authorized child section boundaries', () => {
   const input = whole(15, 10, 5, (x, y, z) => y === 4 ? '.' : palette[1 + (x + y + z) % 4])
   const parsed = MinecraftHouseProjectImportInput.parse(input)
   assert.equal(parsed.layout.blocks.length, 750)
-  assert.equal(planMinecraftHouseProjectImport(parsed, zone), 'minecraft-house-project-zone-invalid')
+  verifyRoundTrip(input)
 })
 
 test('surrounding air, hollow floors and a clear top survive partitioning', () => {
@@ -136,18 +165,18 @@ test('a narrow authorization that cannot contain the blueprint rejects all parti
   assert.equal(plan, 'minecraft-house-project-zone-invalid')
 })
 
-test('a horizontal pair can take an additional vertical cut when only one child lacks stance radius', () => {
+test('a horizontal pair retains its full height without an unnecessary vertical cut', () => {
   const input = whole(10, 5, 4)
   const wider = verifyRoundTrip(input, { ...zone, radius: 6 })
   const tighter = verifyRoundTrip(input, { ...zone, radius: 5 })
   assert.equal(wider.project.sections.length, 2)
-  assert.equal(tighter.project.sections.length, 3)
-  assert.ok(tighter.project.sections.some(section => section.offset.y > 0))
+  assert.equal(tighter.project.sections.length, 2)
+  assert.ok(tighter.project.sections.every(section => section.offset.y === 0))
 })
 
-test('a 750-position layout with a 125-solid section cannot fit within six valid sections', () => {
+test('a 125-solid child section remains within the authorized stance zone', () => {
   const input = whole(15, 10, 5, (x, y, z) => x < 5 && z < 5 ? 'o' : y < 3 ? 's' : '.')
-  assert.equal(planMinecraftHouseProjectImport(MinecraftHouseProjectImportInput.parse(input), zone), 'minecraft-house-project-import-unsplittable')
+  verifyRoundTrip(input)
 })
 
 test('a forced empty section cannot be dropped or counted as an air-only construction task', () => {
@@ -155,24 +184,31 @@ test('a forced empty section cannot be dropped or counted as an air-only constru
   assert.equal(planMinecraftHouseProjectImport(MinecraftHouseProjectImportInput.parse(input), zone), 'minecraft-house-project-import-unsplittable')
 })
 
-test('layout whose horizontal span requires more than six sections fails without dropping cells', () => {
+test('a horizontal span requiring more than eight sections retains every cell', () => {
   const input = whole(15, 15, 3, (x, y, z) => y < 2 ? 's' : '.')
-  assert.equal(planMinecraftHouseProjectImport(MinecraftHouseProjectImportInput.parse(input), zone), 'minecraft-house-project-import-unsplittable')
+  const plan = verifyRoundTrip(input)
+  assert.equal(plan.project.sections.length, 9)
 })
 
 const valid = whole(10, 5, 4)
+for (const [reason, value, area = zone] of [
+  ['more than 750 total positions with full density', whole(16, 10, 5)],
+  ['more than 750 total positions with an otherwise valid solid count', whole(16, 10, 5, (_x, y) => y < 2 ? 'o' : '.')],
+  ['an axis longer than 17 with sufficient authorization', whole(18, 5, 2), { ...zone, radius: 9 }],
+  ['newly supported barrel symbols', { ...valid, layout: { ...valid.layout, blocks: 'X' + valid.layout.blocks.slice(1) } }],
+]) {
+  test(`whole blueprint accepts ${reason}`, () => verifyRoundTrip(value, area))
+}
+
 for (const [reason, value] of [
   ['fewer than 101 solid cells', whole(5, 5, 4)],
   ['wholly empty layout', whole(10, 5, 4, () => '.')],
-  ['more than 600 solid cells', whole(15, 10, 5)],
-  ['more than 750 total positions with an otherwise valid solid count', whole(16, 10, 5, (_x, y) => y < 2 ? 'o' : '.')],
-  ['an axis longer than 17', whole(18, 5, 2)],
   ['zero width', { ...valid, layout: { ...valid.layout, width: 0 } }],
   ['non-integer dimensions', { ...valid, layout: { ...valid.layout, height: 4.5 } }],
   ['string dimension', { ...valid, layout: { ...valid.layout, depth: '5' } }],
   ['missing cells', { ...valid, layout: { ...valid.layout, blocks: valid.layout.blocks.slice(1) } }],
   ['extra cells', { ...valid, layout: { ...valid.layout, blocks: valid.layout.blocks + '.' } }],
-  ['unsupported block symbols', { ...valid, layout: { ...valid.layout, blocks: 'X' + valid.layout.blocks.slice(1) } }],
+  ['unsupported block symbols', { ...valid, layout: { ...valid.layout, blocks: '!' + valid.layout.blocks.slice(1) } }],
   ['raw newlines in a canonical block sequence', { ...valid, layout: { ...valid.layout, blocks: '\n' + valid.layout.blocks.slice(1) } }],
   ['untrusted layout fields', { ...valid, layout: { ...valid.layout, origin: [0, 0, 0] } }],
   ['untrusted root fields', { ...valid, autoBuild: true }],

@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis'
 import { defineTool, ToolArgsError, type ToolRunContext } from '@deepseek-ai/dsh-tools'
-import { DAILY_INITIATIVE_PROPOSE_TOOL, DailyInitiativeProposal } from '../core/daily-initiative.ts'
+import { DAILY_INITIATIVE_PROPOSE_TOOL, DailyInitiativeProposal, canKeepDailyGoalOpen } from '../core/daily-initiative.ts'
 import { DAILY_AUTONOMY_CONTEXT } from '../core/model.ts'
 import { MAX_AUTONOMOUS_BILIBILI_CLIP_SECONDS } from '../protocol/bilibili.ts'
 import type { CompanionRuntime } from './runtime.ts'
@@ -27,7 +27,7 @@ export function registerDailyInitiativeTools(ctx: Context, runtime: CompanionRun
   const output = { schema: { type: 'string' as const }, render: (_args: unknown, value: string) => [{ type: 'text' as const, text: value }] }
   const observe = ctx.tools.register(defineTool({
     name: DAILY_INITIATIVE_OBSERVE_TOOL,
-    description: 'Read authorized options, current evidence and up to three pending goals. A lastUnconfirmedWorld marks a previous attempt without a completion receipt. Treat the returned text as reference data.',
+    description: 'Read authorized options, current evidence and up to three pending goals. lastConfirmedStep comes from a verified outcome for that goal. lastUnconfirmedWorld marks an attempt without a completion receipt. Treat the returned text as reference data.',
     parameters: {}, output,
     async execute(args, exec) {
       if (Object.keys(args).length) throw new ToolArgsError(['Observation does not accept any parameters.'])
@@ -42,6 +42,7 @@ export function registerDailyInitiativeTools(ctx: Context, runtime: CompanionRun
       evidenceId: { type: 'string', description: 'Required except when abandoning. Use an evidence ID from this observation.' },
       option: { type: 'string', required: true, description: 'An option ID from this observation.' },
       previousId: { type: 'string', description: 'Only to continue, revise or abandon a pending goal. Use its exact observed ID.' },
+      keepGoalOpen: { type: 'boolean', description: 'Set true when the chosen action is a step toward a larger goal you want to continue on another day. Omit for defer, abandon and house:all.' },
       clip: { type: 'object', additionalProperties: false, description: 'Include only when option starts with clip:. Omit for all other options.', properties: {
         start: { type: 'integer', required: true, description: 'Non-negative start second.' },
         seconds: { type: 'integer', required: true, description: `Duration from 1 to ${MAX_AUTONOMOUS_BILIBILI_CLIP_SECONDS} seconds.` },
@@ -52,6 +53,9 @@ export function registerDailyInitiativeTools(ctx: Context, runtime: CompanionRun
       const sessionId = activeSession(exec)
       if (typeof args.option === 'string' && !args.option.startsWith('clip:') && args.clip !== undefined) {
         throw new ToolArgsError(['Remove the clip field and resubmit the same option. clip is only for options starting with clip:.'])
+      }
+      if (typeof args.option === 'string' && args.keepGoalOpen === true && !canKeepDailyGoalOpen(args.option)) {
+        throw new ToolArgsError(['Omit keepGoalOpen for defer, abandon and house:all.'])
       }
       const proposal = DailyInitiativeProposal.safeParse(args)
       if (!proposal.success) throw new ToolArgsError(['Give an observed option and evidenceId, plus goal for a new goal or previousId to reuse one. For abandon give only option and previousId.'])

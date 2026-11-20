@@ -99,14 +99,13 @@ test('house draft binds only the explicit current owner turn and its actual imag
   begin(7, message('layered', '请帮我照这张图盖一间木屋', [image]))
   await assert.rejects(execute(7, dimensions), /exactly one of facade, layers or blocks/u)
   await assert.rejects(execute(7, { ...layered, blocks }), /exactly one of facade, layers or blocks/u)
-  await assert.rejects(execute(7, { ...layered, width: 65 }), /width: use an integer from 1 to 64/u)
+  await assert.rejects(execute(7, { ...layered, width: 65 }), /layers\[0\]\[0\]: use exactly 65 characters/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co', 'o.']] }), /expected 2 layers bottom to top, received 1/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co'], ['.g', 'g.']] }), /layers\[0\]: expected 2 rows north to south/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co', 'o.'], ['.g', 'gz']] }), /layers\[1\]\[1\]: use exactly 2 characters/u)
   await assert.rejects(execute(7, { ...layered, layers: [['co', 'o.'], ['.g', 'g']] }), /layers\[1\]\[1\]: use exactly 2 characters/u)
   await assert.rejects(execute(7, { ...dimensions, blocks: 'co' }), /expected 8 cells including air, received 2/u)
-  await assert.rejects(execute(7, { ...dimensions, blocks: '........' }), /one to 20000 solid blocks/u)
-  await assert.rejects(execute(7, { ...dimensions, width: 64, depth: 64, height: 64, blocks: 'o'.repeat(20001) + '.'.repeat(262144 - 20001) }), /one to 20000 solid blocks/u)
+  await assert.rejects(execute(7, { ...dimensions, blocks: '........' }), /at least one solid block/u)
   assert.equal(store.minecraftHouses.list().length, 2)
   emit('step/end', { turn: 7, step: 1 })
   emit('step/start', { turn: 7, step: 2 })
@@ -141,6 +140,12 @@ test('house draft binds only the explicit current owner turn and its actual imag
   assert.equal(compactDraft.facade, undefined)
   assert.equal(store.tasks().length, 0)
 
+  begin(12, message('spacious', '帮我盖一间大房子'))
+  const spacious = JSON.parse(await execute(12, { name: '大房子', assumptions: '保留完整空间',
+    width: 64, depth: 64, height: 64, blocks: 'o'.repeat(20001) + '.'.repeat(262144 - 20001) }))
+  assert.equal(spacious.materials.oak_planks, 20001)
+  assert.equal(store.minecraftHouses.list().length, 5)
+
   session.requestHeader = () => undefined
   begin(9, message('stale-during-lookup', '照这张图盖一间小屋', [image]))
   let finishLookup
@@ -151,7 +156,7 @@ test('house draft binds only the explicit current owner turn and its actual imag
   await assert.rejects(stale, /new owner message/u)
   assert.equal(modelLookups.at(-1).provider, 'default-provider')
   assert.equal(modelLookups.at(-1).model, 'default-model')
-  assert.equal(store.minecraftHouses.list().length, 4)
+  assert.equal(store.minecraftHouses.list().length, 5)
 
   begin(10, message('no-vision-needed', '帮我盖一间小屋'))
   resolveModelInfo = async () => ({ inputModalities: ['text'] })

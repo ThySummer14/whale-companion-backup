@@ -2,17 +2,18 @@ import type { Context } from '@deepseek-ai/cordis'
 import { createUserMessage, type Message, type UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionLogOffset, type Session } from '@deepseek-ai/dsh-session'
 import type { CompanionStore } from '../core/store.ts'
+import { legacyVoxelBuildMemory } from '../core/minecraft-blueprint-build.ts'
 import { minecraftOwnerMessageText } from '../core/minecraft-chat.ts'
 import { lexicalMatcher } from '../core/memory.ts'
 import { BILIBILI_AUTONOMY_CONTEXT, BILIBILI_REFLECTION_CONTEXT, SELF_NOTE_TRAIT_LABELS, type MemoryRecord, type SelfNote, type SelfNoteTrait, type SessionBinding } from '../core/model.ts'
 import { isCompanionDecisionContext } from './tool-policy.ts'
-import { isFeedReplyContext } from '../core/feed-reply.ts'
+import { FEED_REPLY_CONTEXT_PREFIX, FeedReplyPayload, currentFeedReplyMemories, feedReplyPrompt, isFeedReplyContext } from '../core/feed-reply.ts'
 
 declare module '@deepseek-ai/dsh-llm' {
   interface MessageSourceMap {
     'companion-memory': {
       kind: 'companion-memory'
-      form: 'recall'
+      form: 'recall' | 'feed-reply'
       format?: 2
       selfNoteIds?: readonly string[]
     }
@@ -58,8 +59,12 @@ function clipped(text: string, limit: number, multiline = false): string {
   return escaped.slice(0, limit - marker.length).replace(/[\uD800-\uDBFF]$/u, '') + marker
 }
 
-function memoryLine(memory: MemoryRecord, limit: number, multiline = false): string {
-  return `- [${memory.kind}｜重要度 ${memory.importance.toFixed(2)}｜来源 ${memory.id}] ${clipped(memory.content, limit, multiline)}`
+function memoryLine(memory: MemoryRecord, limit: number, multiline = false, content = memory.content): string {
+  return `- [${memory.kind}｜重要度 ${memory.importance.toFixed(2)}｜来源 ${memory.id}] ${clipped(content, limit, multiline)}`
+}
+
+function memoryRecallLine(store: CompanionStore, memory: MemoryRecord, limit: number): string {
+  return memoryLine(memory, limit, false, legacyVoxelBuildMemory(store, memory))
 }
 
 function recallMessage(text: string, selfNoteIds: readonly string[] = []): UserMessage {
@@ -92,6 +97,12 @@ export function retireStaleRecall(session: Session, store: CompanionStore, conte
   for (const seq of [...session.surface.nodes]) {
     const [event] = session.snapshotEvents(SessionLogOffset(seq), SessionLogOffset(Number(seq) + 1))
     if (event?.type !== 'user/message' || event.data.source.kind !== 'companion-memory') continue
+    if (event.data.source.form === 'feed-reply') {
+      session.append('user/message', recallMessage(WITHDRAWN), {
+        surfaceOp: { op: 'replace', startSeq: seq, endSeq: seq }, sourceEventSeqs: [seq],
+      })
+      continue
+    }
     const original = messageText(event.data)
     if (!original.startsWith(HEADER) || !original.endsWith(FOOTER)) continue
     const lines = original.slice(HEADER.length, -FOOTER.length).split('\n')
@@ -134,8 +145,9 @@ export function retireStaleRecall(session: Session, store: CompanionStore, conte
         for (let id; (id = FACT_LINE.exec(lines[index + 1] ?? '')?.[1]);) {
           const line = lines[++index]!
           const memory = visible(id)
+          const limit = label === ANCHOR_LABEL ? 320 : 520
           if (memory && (label !== ANCHOR_LABEL || memory.pinned) &&
-              line === memoryLine(memory, label === ANCHOR_LABEL ? 320 : 520)) kept.push(line)
+              (line === memoryLine(memory, limit) || line === memoryRecallLine(store, memory, limit))) kept.push(line)
         }
         if (kept.length) current.push(label, ...kept)
       }
@@ -185,13 +197,48 @@ function recentRecallBlocks(messages: readonly Message[]): string[] {
   return blocks
 }
 
+function feedReplyRecall(store: CompanionStore, binding: SessionBinding, claimed: readonly UserMessage[], admitted: readonly UserMessage[]):
+  MemoryRecord[] | undefined {
+  const job = store.autonomy.pending('feed.reply', binding.contextId)
+  const payload = FeedReplyPayload.safeParse(job?.payload).data
+  if (!payload?.memoryRefs?.length) return []
+  const settings = store.autonomy.settings()
+  if (job?.task.status !== 'running' || (job.leaseUntil ?? 0) <= Date.now() || !settings.enabled || !settings.feedRepliesEnabled ||
+    binding.kind !== 'system' || payload.reviewSessionId !== binding.sessionId || binding.contextId !== FEED_REPLY_CONTEXT_PREFIX + payload.postId) return
+
+  const original = claimed[0]
+  if (claimed.length !== 1 || original?.source.kind !== 'user') return
+  let thread
+  try { thread = store.feed.replySnapshot(payload.postId) } catch { return }
+  const target = thread.replies.at(-1) ?? thread
+  if (target.author !== 'user' || target.id !== payload.triggerPostId) return
+  const prompt = feedReplyPrompt(store.persona(), thread, true).trim()
+  if (messageText(original) !== prompt ||
+    !admitted.some(message => message.id === original.id && message.source.kind === 'user' && messageText(message) === prompt)) return
+  return currentFeedReplyMemories(store.memory, payload.memoryRefs)
+}
+
 export function registerMemoryRecall(ctx: Context, store: CompanionStore): void {
   ctx.on('agent/pre-step', async ({ agent, messages: claimed, turn, step, signal }, next) => {
     const decision = await next()
     if (decision.kind === 'reject' || signal.aborted) return decision
     const binding = store.bindingBySession(agent.id)
-    if (isFeedReplyContext(binding?.contextId) && step !== 1) return { kind: 'reject' }
     if (binding && agent.session) retireStaleRecall(agent.session, store, binding.contextId)
+    if (binding && isFeedReplyContext(binding.contextId)) {
+      if (step !== 1) return { kind: 'reject' }
+      const facts = feedReplyRecall(store, binding, claimed, decision.messages)
+      if (!facts) return { kind: 'reject' }
+      if (!facts.length) return decision
+      const text = HEADER + JSON.stringify(facts.map(({ kind, content }) => ({
+        kind, fact: clipped(content.replace(/[\p{Cc}\p{Cf}]/gu, ' '), 260),
+      }))) + FOOTER
+      const message = createUserMessage({ content: [{ type: 'text', text }], source: { kind: 'companion-memory', form: 'feed-reply' } })
+      store.memory.recordRecall(facts)
+      store.recordActivity({ contextId: binding.contextId, sessionId: binding.sessionId,
+        source: 'core.memory', kind: 'memory.recalled', summary: `在私有动态回应中引用 ${facts.length} 条共享记忆`,
+        data: { memoryIds: facts.map(fact => fact.id), turn, step, chars: text.length } })
+      return { ...decision, messages: [...decision.messages, message] }
+    }
     if (binding?.contextId === BILIBILI_AUTONOMY_CONTEXT || binding?.contextId === BILIBILI_REFLECTION_CONTEXT) {
       const current = decision.messages.findLast(message => message.role === 'user' && message.source.kind === 'user')
       return current ? { ...decision, messages: [current] } : decision
@@ -224,7 +271,7 @@ export function registerMemoryRecall(ctx: Context, store: CompanionStore): void 
     let anchors: MemoryRecord[] = []
     if (turn === 1) {
       const pinned = store.memory.list({ ...options, pinned: true, limit: 3 })
-      anchors = appendGroup(ANCHOR_LABEL, pinned, memory => memoryLine(memory, 320))
+      anchors = appendGroup(ANCHOR_LABEL, pinned, memory => memoryRecallLine(store, memory, 320))
     }
     const anchoredIds = new Set(anchors.map(memory => memory.id))
     const candidates = store.memory.find(query, { ...options, limit: 4 + anchors.length }).filter(memory => !anchoredIds.has(memory.id)).slice(0, 4)
@@ -233,8 +280,12 @@ export function registerMemoryRecall(ctx: Context, store: CompanionStore): void 
     // fact behind an outdated per-process or append-log deduplication cache.
     const surface = (candidates.length || selfNotes.length) && agent.session ? agent.session.deriveMessages().slice(-RECENT_SURFACE_MESSAGES) : []
     const recent = candidates.length ? recentRecallBlocks(surface) : []
-    const reused = new Set(candidates.filter(memory => recent.some(block => block.includes('\n' + memoryLine(memory, 520) + '\n'))))
-    const matches = appendGroup(MATCH_LABEL, candidates.filter(memory => !reused.has(memory)), memory => memoryLine(memory, 520))
+    const renderMatch = (memory: MemoryRecord) => memoryRecallLine(store, memory, 520)
+    const reused = new Set(candidates.filter(memory => {
+      const line = '\n' + renderMatch(memory) + '\n'
+      return recent.some(block => block.includes(line))
+    }))
+    const matches = appendGroup(MATCH_LABEL, candidates.filter(memory => !reused.has(memory)), renderMatch)
     if (query && selfNotes.length) {
       const match = lexicalMatcher(query)
       const currentTrait = selfNotes.find(note => note.trait)?.trait

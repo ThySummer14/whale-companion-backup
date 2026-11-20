@@ -61,7 +61,7 @@ test('the v40 upgrade preserves the daily history and leaves initiative off unle
   finally { final.close() }
   const inspect = new DatabaseSync(path, { readOnly: true })
   try {
-    assert.equal(inspect.prepare('PRAGMA user_version').get().user_version, 44)
+    assert.equal(inspect.prepare('PRAGMA user_version').get().user_version, 49)
     assert.deepEqual(inspect.prepare('SELECT name,sql FROM sqlite_schema ORDER BY name').all(), schema)
     assert.equal(inspect.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
   } finally { inspect.close() }
@@ -153,6 +153,26 @@ test('unconfirmed revisions preserve the original intent, update the latest worl
   const deferred = h.record(3, { initiative: { goal: updatedGoal, evidence, option: 'defer', previous: first } })
   assert.deepEqual(h.find(4), [{ ...deferred, expiresAt: first.expiresAt, lastUnconfirmedWorld: 'bilibili' }])
   assert.deepEqual(h.find(7), [])
+})
+
+test('a success status without a verified outcome cannot create or replace confirmed goal progress', t => {
+  const h = goals(t)
+  const initiative = { goal: originalGoal, evidence, option: 'survey:north', keepGoalOpen: true }
+  const receipt = { sessionId: 'daily-session', eventSeq: 42, optionLabel: '通过预检的营地路线' }
+  h.record(0, { initiative, status: 'succeeded', choice: 'survey', payload: { initiativeReceipt: receipt } })
+  assert.deepEqual(h.find(1), [])
+
+  const summary = '已核对北侧路线并返回营地。'
+  const first = h.record(1, { initiative, status: 'succeeded', choice: 'survey',
+    payload: { initiativeReceipt: receipt, initiativeOutcome: summary } })
+  const pending = [{ ...first, lastConfirmedStep: { at: new Date(BASE + DAY).toISOString(), summary } }]
+  h.record(2, { initiative: { goal: updatedGoal, evidence, option: 'survey:north', previous: first }, status: 'succeeded', choice: 'survey' })
+  assert.deepEqual(h.find(3), pending)
+
+  h.record(4, { initiative: { ...initiative, goal: updatedGoal, previous: first }, choice: 'survey', status: 'failed',
+    payload: { initiativeAttempt: 'minecraft', activityTaskId: childTask } })
+  assert.deepEqual(h.find(5), [{ ...pending[0], lastUnconfirmedWorld: 'minecraft' }])
+  assert.deepEqual(h.find(8), [])
 })
 
 test('incomplete, foreign and contradictory history cannot become a pending initiative', async t => {

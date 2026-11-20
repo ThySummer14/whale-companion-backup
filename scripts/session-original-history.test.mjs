@@ -21,6 +21,43 @@ function fixture(session) {
   return { service, rebind: sessionId => { binding = { contextId, sessionId } } }
 }
 
+test('chat operations reject a context switch during cold session resume', async t => {
+  for (const method of ['send', 'cancel']) await t.test(method, async () => {
+    let binding = { contextId, sessionId: SessionId('old-chat'), kind: 'chat' }
+    const pending = Promise.withResolvers()
+    const resumed = Promise.withResolvers()
+    const actions = []
+    const activities = []
+    const agentFor = id => ({ id, session: Session.create(id),
+      followup: message => actions.push({ id, method: 'send', message }), cancel: () => actions.push({ id, method: 'cancel' }) })
+    const agent = agentFor(binding.sessionId)
+    const replacement = agentFor(SessionId('new-chat'))
+    const agents = new Map([[replacement.id, replacement]])
+    const service = new SessionService({
+      agents: { get: id => agents.get(id), async resume({ resumeSessionId }) {
+        assert.equal(resumeSessionId, agent.id)
+        resumed.resolve()
+        await pending.promise
+        agents.set(agent.id, agent)
+        return { agent }
+      } },
+      agentDefaultModel: { currentSelection: () => ({}) },
+    }, { bindingByContext: () => binding, bindingBySession: () => binding, recordActivity: activity => activities.push(activity) }, () => {})
+
+    const request = () => method === 'send' ? service.send(contextId, '这句话属于当前聊天。') : service.cancel(contextId)
+    const first = request()
+    await resumed.promise
+    binding = { ...binding, sessionId: replacement.id }
+    pending.resolve()
+    await assert.rejects(first, { code: 'binding-conflict' })
+    assert.deepEqual(actions, [])
+    assert.deepEqual(activities, [])
+    await request()
+    assert.deepEqual(actions.map(action => [action.id, action.method]), [[replacement.id, method]])
+    assert.equal(activities[0].sessionId, replacement.id)
+  })
+})
+
 test('review keeps the original ordered chat through one exact completed turn after model compaction', async () => {
   const session = Session.create(SessionId('phone'))
   const { service } = fixture(session)

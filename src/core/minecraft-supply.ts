@@ -21,7 +21,7 @@ export const MinecraftAuthorizedZone = z.strictObject({
   x: z.number().int().min(-30_000_000).max(30_000_000),
   y: z.number().int().min(-2048).max(2032),
   z: z.number().int().min(-30_000_000).max(30_000_000),
-  radius: z.number().int().min(2).max(8),
+  radius: z.number().int().min(2),
 })
 
 export const MinecraftSupplyRequest = z.strictObject({

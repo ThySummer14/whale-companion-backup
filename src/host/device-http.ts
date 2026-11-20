@@ -4,11 +4,15 @@ import { createReadStream, statSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 import { BILIBILI_CLIP_CONTEXT, BILIBILI_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_RECOVERY_CONTEXT, MINECRAFT_SHARE_CONTEXT, type ActivityRecord } from '../core/model.ts'
+import { BILIBILI_WATCH_EVENT, bilibiliWatchReceipt } from '../core/bilibili.ts'
 import { HOUSE_COMPLETION_TASK_PREFIX } from '../core/minecraft-house-verification.ts'
-import { minecraftHouseMaterials } from '../core/minecraft-house.ts'
+import { MinecraftHouseDraftInput, MinecraftHouseReceipt, minecraftHouseMaterials } from '../core/minecraft-house.ts'
 import { exportLitematica } from '../core/litematica.ts'
-import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SUPPLY_EVENT, PROJECT_MAX_SECTIONS } from '../core/minecraft-house-project.ts'
+import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SUPPLY_EVENT, HOUSE_PROJECT_VERIFICATION_EVENT, MinecraftHouseProjectVerification } from '../core/minecraft-house-project.ts'
 import { MINECRAFT_PLACE_EVENT } from '../core/minecraft-place.ts'
+import { VoxelBlueprintHash } from '../core/minecraft-voxel-blueprints.ts'
+import { VOXEL_BUILD_EVENT, VoxelBuildInput, VoxelSiteInput, voxelBuildCompletion } from '../core/minecraft-blueprint-build.ts'
+import type { CompanionStore } from '../core/store.ts'
 import { isFeedReplyContext } from '../core/feed-reply.ts'
 import type { WorkbenchView } from '../protocol/api.ts'
 import { streamAudio } from './audio.ts'
@@ -58,6 +62,8 @@ function houseApprovals(runtime: CompanionRuntime) {
     items: drafts.map(({ id, name, zoneId, revision, status, assumptions, layout }) =>
       ({ id, name, zoneId, revision: revision ?? 0, status, assumptions, layout, materials: minecraftHouseMaterials(layout) })),
     zones: zones.map(({ id, name, dimension, x, y, z }) => ({ id, name, dimension, x, y, z })),
+    ...(runtime.voxelBlueprints && { voxelBlueprints: runtime.voxelBlueprints.list() }),
+    ...(runtime.voxelConstruction && { voxelZones: runtime.voxelConstruction.zones() }),
   }
 }
 
@@ -71,14 +77,26 @@ function requireDeviceContext(contextId: string | undefined): void {
   if (!deviceContextAllowed(contextId)) throw new DeviceAuthError(403, 'device-context-forbidden')
 }
 
-export function deviceActivity(activity: ActivityRecord): ActivityRecord | undefined {
+export function deviceActivity(activity: ActivityRecord, store?: CompanionStore): ActivityRecord | undefined {
   if (activity.contextId === MINECRAFT_RECOVERY_CONTEXT) return
+  if (activity.kind === BILIBILI_WATCH_EVENT) {
+    const watch = bilibiliWatchReceipt(activity)
+    if (!watch) return
+    const { sessionId: _session, taskId: _task, ...receipt } = activity
+    return { ...receipt, kind: 'video.watched', data: { title: watch.title, source: watch.source } }
+  }
   if (isFeedReplyContext(activity.contextId)) {
     if (activity.source !== 'core.feed' || activity.kind !== 'post.replied' || activity.data.author !== 'companion') return
     const { contextId: _context, sessionId: _session, taskId: _task, ...receipt } = activity
     return receipt
   }
   if (activity.source === 'game.build' && ['build-zone.created', 'build-zone.revoked'].includes(activity.kind)) return
+  if (activity.kind === VOXEL_BUILD_EVENT) {
+    const completion = store && voxelBuildCompletion(store, activity)
+    if (!completion) return
+    const { sessionId: _session, taskId: _task, ...receipt } = activity
+    return { ...receipt, data: completion }
+  }
   if (activity.kind === MINECRAFT_PLACE_EVENT) {
     const { dimension, x: px, y: py, z: pz, verifiedAt, actor } = activity.data
     if (activity.source !== 'game.minecraft' || activity.contextId !== 'game.minecraft' || activity.status !== 'success' ||
@@ -91,13 +109,28 @@ export function deviceActivity(activity: ActivityRecord): ActivityRecord | undef
   if (activity.kind === HOUSE_PROJECT_SUPPLY_EVENT) {
     const { index, name, count, consumedLogs } = activity.data
     if (activity.source !== 'game.minecraft' || activity.contextId !== 'game.minecraft' || activity.status !== 'success' ||
-      typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= PROJECT_MAX_SECTIONS ||
+      typeof index !== 'number' || !Number.isInteger(index) || index < 0 ||
       name !== 'oak_planks' && name !== 'spruce_planks' || count !== 4 || consumedLogs !== 1) return
     return { ...activity, data: { index, name, count, consumedLogs } }
   }
-  if (activity.source === 'game.minecraft' && activity.kind === 'world.house-project-section' && Object.hasOwn(activity.data, 'dailyTaskId')) {
-    const { dailyTaskId: _parent, projectId: _project, zoneId: _zone, ...data } = activity.data
-    return { ...activity, data }
+  if (activity.kind === 'world.house-project-section' || activity.kind === HOUSE_PROJECT_VERIFICATION_EVENT) {
+    if (activity.source !== 'game.minecraft' || activity.contextId !== 'game.minecraft') return
+    const { sessionId: _session, taskId: _task, ...receipt } = activity
+    const { projectName, dailyTaskId, matched, checked, unmatchedSections, index, built, zoneId, placed, consumed, creative, recovery } = activity.data
+    const name = MinecraftHouseDraftInput.shape.name.safeParse(projectName).data
+    const project: ActivityRecord['data'] = name === undefined ? {} : { projectName: name }
+    if (activity.kind === HOUSE_PROJECT_VERIFICATION_EVENT) {
+      // The autonomous parent keeps its own proof, in addition to the individual verification event.
+      if (dailyTaskId !== undefined) return
+      const verification = MinecraftHouseProjectVerification.safeParse({ matched, checked, unmatchedSections }).data
+      if (!verification || activity.status !== (verification.matched ? 'success' : 'warning')) return
+      return { ...receipt, data: { ...project, ...verification } }
+    }
+    if (activity.status !== 'success' || typeof index !== 'number' || !Number.isSafeInteger(index) || index < 0) return
+    const section = MinecraftHouseReceipt.safeParse({ built, zoneId, checked, placed, consumed, ...(creative === true && { creative }) }).data
+    if (!section) return
+    const { zoneId: _zone, ...data } = section
+    return { ...receipt, data: { ...project, index, ...data, ...(recovery === true && { recovery }) } }
   }
   if (activity.source !== 'core.memory' || activity.sessionId === undefined) return activity
   // Memory can be shared across scenes while its authoring session stays on the host.
@@ -105,7 +138,7 @@ export function deviceActivity(activity: ActivityRecord): ActivityRecord | undef
   return projected
 }
 
-function deviceState(view: WorkbenchView): WorkbenchView {
+function deviceState(view: WorkbenchView, store: CompanionStore): WorkbenchView {
   const visible = ({ contextId }: { contextId?: string }) => !isFeedReplyContext(contextId) && contextId !== BILIBILI_CLIP_CONTEXT && contextId !== BILIBILI_SHARE_CONTEXT &&
     contextId !== DAILY_AUTONOMY_CONTEXT && contextId !== DAILY_REFLECTION_CONTEXT &&
     contextId !== DAILY_VISIT_CONTEXT && contextId !== MINECRAFT_SHARE_CONTEXT && contextId !== MINECRAFT_RECOVERY_CONTEXT
@@ -133,7 +166,7 @@ function deviceState(view: WorkbenchView): WorkbenchView {
     stats: deviceStats,
     bindings: view.bindings?.filter(visible),
     sessions: view.sessions?.filter(session => !privateSessions.has(session.id)),
-    activities: view.activities?.map(deviceActivity).filter((activity): activity is ActivityRecord => activity !== undefined && visible(activity)),
+    activities: view.activities?.map(activity => deviceActivity(activity, store)).filter((activity): activity is ActivityRecord => activity !== undefined && visible(activity)),
     tasks: view.tasks?.filter(visible).map(task => {
       if (!task.externalId?.startsWith(HOUSE_COMPLETION_TASK_PREFIX) && !task.externalId?.startsWith(DAILY_HOUSE_PROJECT_TASK_PREFIX)) return task
       const { externalId: _source, ...projected } = task
@@ -169,11 +202,11 @@ async function body(req: IncomingMessage, limit?: number): Promise<unknown> {
   return parseJson(await readBody(req, limit))
 }
 
-function noticeQueryInt(value: string | undefined): number | undefined {
-  if (value === undefined) return undefined
+function queryInt(value: string | null | undefined, schema: z.ZodNumber): number | undefined {
+  if (value == null) return undefined
   const number = Number(value)
   if (String(number) !== value) throw new DeviceAuthError(400, 'invalid-request')
-  return NoticeId.parse(number)
+  return schema.parse(number)
 }
 
 function noticeListQuery(params: URLSearchParams): { before?: number; limit?: number } {
@@ -182,8 +215,8 @@ function noticeListQuery(params: URLSearchParams): { before?: number; limit?: nu
   if (beforeValues.length > 1 || limitValues.length > 1 || params.size !== beforeValues.length + limitValues.length) {
     throw new DeviceAuthError(400, 'invalid-request')
   }
-  const before = noticeQueryInt(beforeValues[0])
-  const limit = noticeQueryInt(limitValues[0])
+  const before = queryInt(beforeValues[0], NoticeId)
+  const limit = queryInt(limitValues[0], NoticeId)
   if (limit !== undefined && limit > 50) throw new DeviceAuthError(400, 'invalid-request')
   return { before, limit }
 }
@@ -323,15 +356,89 @@ export function registerDeviceHttp(ctx: Context, runtime: CompanionRuntime, devi
             if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
             const input = QwenWatchInput.parse(await body(req, 8192))
             devices.authenticate(req)
-            const { target, ...result } = await whileConnected(res, signal => runtime.qwenWatch.reply(device.id, input, runtime.store.persona(),
+            const result = await whileConnected(res, signal => runtime.qwenWatch.reply(device.id, input, runtime.store.persona(),
               signal, () => { devices.authenticate(req) }))
-            if (target) runtime.store.recordActivity({ contextId: BILIBILI_CONTEXT, source: 'media.bilibili', kind: 'video.watched',
-              summary: '一起看 B 站片段', status: 'success', data: { ...target } })
             if (!res.destroyed) json(res, 200, result)
+            return
+          }
+          if (method === 'GET' && path === 'bilibili/watch') {
+            if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
+            json(res, 200, { thread: runtime.qwenWatch.session(device.id) ?? null })
+            return
+          }
+          if (method === 'POST' && path === 'bilibili/watch/remember') {
+            if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
+            const { activityId } = z.strictObject({ activityId: z.int().positive() }).parse(await body(req, 1024))
+            devices.authenticate(req)
+            const created = runtime.store.transaction(() => {
+              const watch = bilibiliWatchReceipt(runtime.store.activityById(activityId))
+              if (!watch) throw new DeviceAuthError(404, 'bili-watch-receipt-not-found')
+              const memory = runtime.store.memory.experienceCreatedFromActivity(BILIBILI_CONTEXT, activityId)
+              if (memory) {
+                if (memory.status !== 'active' || memory.scope !== 'shared') {
+                  throw new DeviceAuthError(409, 'bili-watch-memory-withdrawn')
+                }
+                return false
+              }
+              const { bvid, part, startSeconds, seconds, visual, audio } = watch.source
+              const material = visual ? (audio ? '画面和声音' : '画面') : '声音'
+              runtime.store.memory.create({
+                kind: 'experience', contextId: BILIBILI_CONTEXT, scope: 'shared', status: 'active', confidence: 1,
+                content: `我们一起看过 B 站《${watch.title}》（${bvid}）第 ${part} P，从 ${startSeconds} 秒起的 ${seconds} 秒片段（${material}）。`,
+                sourceRefs: [{ contextId: BILIBILI_CONTEXT, activityId }], reason: '主人从共看回执保存共享经历',
+              })
+              return true
+            })
+            json(res, created ? 201 : 200, { shared: true })
             return
           }
           const houseAction = /^minecraft\/approvals\/([\da-f-]+)\/(preview|build)$/u.exec(path)
           const houseProjection = /^minecraft\/approvals\/([\da-f-]+)\/projection$/u.exec(path)
+          const voxelConstruction = /^minecraft\/voxel-blueprints\/([\da-f-]+)\/(site|build)$/u.exec(path)
+          if (method === 'POST' && voxelConstruction) {
+            if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
+            const id = z.uuid().parse(voxelConstruction[1])
+            const authorization = { deviceId: device.id, assertCurrent: () => { devices.authenticate(req) } }
+            const input = await body(req, 1024)
+            const result = voxelConstruction[2] === 'site'
+              ? await whileConnected(res, signal => runtime.voxelConstruction.preview(id, VoxelSiteInput.parse(input), signal, authorization))
+              : await runtime.voxelConstruction.build(id, VoxelBuildInput.parse(input), authorization)
+            devices.authenticate(req)
+            if (!res.destroyed) json(res, 200, result)
+            return
+          }
+          const voxelBlueprint = /^minecraft\/voxel-blueprints\/([\da-f-]+)\/(schematic|preview|review)$/u.exec(path)
+          if (voxelBlueprint && (method === 'GET' && voxelBlueprint[2] !== 'review' || method === 'POST' && voxelBlueprint[2] === 'review')) {
+            if (url.searchParams.size) throw new DeviceAuthError(400, 'invalid-request')
+            const id = z.uuid().parse(voxelBlueprint[1])
+            const assertCurrent = () => { devices.authenticate(req) }
+            if (voxelBlueprint[2] === 'review') {
+              const { sha256, approved } = z.strictObject({ sha256: VoxelBlueprintHash, approved: z.boolean() }).parse(await body(req, 1024))
+              assertCurrent()
+              const review = await runtime.voxelBlueprints.review(id, sha256, approved, assertCurrent)
+              if (!res.destroyed) json(res, 200, review)
+            } else {
+              const part = voxelBlueprint[2] === 'preview' ? 'preview' : 'schematic'
+              const file = await runtime.voxelBlueprints.read(id, part, assertCurrent)
+              if (!res.destroyed) {
+                res.writeHead(200, { 'content-type': file.mimeType, 'content-length': file.bytes.length, 'cache-control': 'private, no-store',
+                  'x-content-type-options': 'nosniff',
+                  ...(part === 'schematic' && { 'content-disposition': `attachment; filename="blueprint-${id}.schem"` }) })
+                res.end(file.bytes)
+              }
+            }
+            return
+          }
+          const projectSections = /^minecraft\/house-projects\/([\da-f-]+)\/sections$/u.exec(path)
+          if (method === 'GET' && projectSections) {
+            const cursor = url.searchParams.get('after')
+            if (url.searchParams.size !== (cursor === null ? 0 : 1)) throw new DeviceAuthError(400, 'invalid-request')
+            const after = queryInt(cursor, z.int().nonnegative())
+            const page = runtime.store.minecraftHouseProjects.progressSections(z.uuid().parse(projectSections[1]), after ?? -1)
+            if (!page) throw new DeviceAuthError(404, 'minecraft-house-project-unavailable')
+            json(res, 200, { version: 1, ...page })
+            return
+          }
           if (method === 'GET' && houseProjection) {
             const { revision } = z.strictObject({ revision: z.string().regex(/^\d{1,15}$/u).transform(Number) })
               .parse(Object.fromEntries(url.searchParams))
@@ -549,11 +656,12 @@ export function registerDeviceHttp(ctx: Context, runtime: CompanionRuntime, devi
           if (method === 'GET' && path === 'state') {
             const avatarCapability = await avatarViewer?.capability(req)
             const current = devices.authenticate(req)
-            const view = deviceState(runtime.view())
+            const view = deviceState(runtime.view(), runtime.store)
             const notices = runtime.store.notices.summary(current.id)
             if (!notices) throw new DeviceAuthError(401, 'device-unauthorized')
             json(res, 200, { ...view, notices, houseApprovals: houseApprovals(runtime),
-              bilibiliWatch: { version: 1, ready: runtime.qwenWatch?.ready === true }, noticeGroups: 1, chatSend: { version: 1 },
+              houseProjectProgress: { version: 1, items: runtime.store.minecraftHouseProjects.progress() },
+              bilibiliWatch: { version: 1, ready: runtime.qwenWatch?.ready === true, resume: true }, noticeGroups: 1, chatSend: { version: 1 },
               ...(avatarCapability && { avatarViewer: avatarCapability }) })
             return
           }

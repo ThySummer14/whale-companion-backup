@@ -1,7 +1,10 @@
 import { createHash } from 'node:crypto'
+import { z } from 'zod'
 import { MAX_BILIBILI_CLIP_SECONDS, type BilibiliClipInput } from '../protocol/bilibili.ts'
+import { BILIBILI_CONTEXT, type ActivityRecord } from './model.ts'
 
 const BVID = /^BV[A-Za-z0-9]{10}$/u
+const MAX_CLIP_START = 7 * 86_400
 const PLAYER_ORIGIN = 'https://www.bilibili.com'
 const SPACE_ORIGIN = 'https://space.bilibili.com'
 const SUBTITLE_ORIGINS = new Set(['https://aisubtitle.hdslb.com', 'https://i0.hdslb.com'])
@@ -53,9 +56,32 @@ export function parseBilibiliClipRequest(text: string): BilibiliClipInput | unde
   if (!target || time.slice(1).some(part => part >= 60)) return
   const start = time.reduce((total, part) => total * 60 + part, 0)
   const seconds = Number(match[3])
-  if (start > 7 * 86_400 || seconds < 1 || seconds > MAX_BILIBILI_CLIP_SECONDS) return
+  if (start > MAX_CLIP_START || seconds < 1 || seconds > MAX_BILIBILI_CLIP_SECONDS) return
   const mode = match[4] === '画面' ? 'visual' : match[4] === '声音' ? 'audio' : 'both'
   return { ...target, start, seconds, mode }
+}
+
+export const BILIBILI_WATCH_EVENT = 'video.watch-completed'
+
+const watchData = z.object({
+  title: z.string().trim().min(1).max(240),
+  source: z.object({
+    bvid: z.string().regex(BVID),
+    part: z.int().min(1).max(1000),
+    startSeconds: z.int().min(0).max(MAX_CLIP_START),
+    seconds: z.int().min(1).max(MAX_BILIBILI_CLIP_SECONDS),
+    visual: z.boolean(),
+    audio: z.boolean(),
+  }).refine(source => source.visual || source.audio),
+})
+
+export type BilibiliWatchReceipt = { activityId: number } & z.infer<typeof watchData>
+
+export function bilibiliWatchReceipt(activity: ActivityRecord | undefined): BilibiliWatchReceipt | undefined {
+  if (activity?.kind !== BILIBILI_WATCH_EVENT || activity.source !== 'media.bilibili' ||
+      activity.contextId !== BILIBILI_CONTEXT || activity.status !== 'success') return
+  const data = watchData.safeParse(activity.data)
+  if (data.success) return { activityId: activity.id, ...data.data }
 }
 
 export function subtitleUrl(value: string): URL | undefined {

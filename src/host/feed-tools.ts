@@ -19,22 +19,23 @@ export function registerFeedTools(ctx: Context, runtime: CompanionRuntime): () =
     if (binding.contextId === 'memory.curator' || isFeedReplyContext(binding.contextId)) throw new Error('Private evaluations cannot access feed tools')
     return { agent, binding }
   }
-  const readFor = (contextId: string, id?: string, limit?: number) => {
+  const readFor = (contextId: string, kind: string, id?: string, limit?: number) => {
     if (contextId === 'autonomy.feed' && id) throw new Error('Autonomous feed review can only read the timeline')
-    return id ? store.feed.get(id) : store.feed.list({ limit: Math.max(1, Math.min(20, Math.floor(limit ?? 10))) })
+    const max = kind === 'chat' ? 5 : 20
+    return id ? store.feed.get(id) : store.feed.list({ limit: Math.max(1, Math.min(max, Math.floor(limit ?? Math.min(max, 10)))) })
   }
   const disposers = [
     ctx.tools.register(defineTool({
       name: 'companion_feed_read',
-      description: 'Read real posts from the shared Companion timeline. Use post ids from this result when replying. Do not invent posts, activities, or replies that are not present.',
+      description: 'Read the latest real Companion timeline posts, including owner posts. An explicit chat read is available during quiet hours. Pass a real post ID to read the thread and its comments.',
       parameters: {
         id: { type: 'string', description: 'Optional real post id to read with its replies.' },
-        limit: { type: 'number', description: 'Maximum recent top-level posts, from 1 to 20. Default 10.' },
+        limit: { type: 'number', description: 'Maximum recent top-level posts. Up to 5 in chat or 20 in a timeline review.' },
       },
       output,
       async execute(args, exec) {
         const { binding } = authority(exec)
-        return JSON.stringify(readFor(binding.contextId, args.id), null, 2)
+        return JSON.stringify(readFor(binding.contextId, binding.kind, args.id, args.limit))
       },
     })),
     ctx.tools.register(defineTool({

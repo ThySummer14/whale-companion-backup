@@ -4,12 +4,15 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { FEED_REPLY_CONTEXT_PREFIX, FeedReplyDecision, feedReplyPrompt } from '../src/core/feed-reply.ts'
 import { CompanionStore } from '../src/core/store.ts'
 import { AutonomyService } from '../src/host/autonomy.ts'
 import { registerFeedReplyBudget } from '../src/host/bilibili-choice-budget.ts'
 import { deviceFeedPost } from '../src/host/device-feed.ts'
 import { deviceContextAllowed } from '../src/host/device-http.ts'
+import { registerMemoryRecall } from '../src/host/recall.ts'
 import { companionToolPolicy } from '../src/host/tool-policy.ts'
 
 const DECISION = JSON.stringify({ decision: 'reply', body: '等你有空再一起去看。' })
@@ -41,6 +44,8 @@ function fixture(t) {
   }
   const service = new AutonomyService(store, sessions, undefined, undefined, input => store.feed.create(input))
   service.updateSettings({ quietStart: '00:00', quietEnd: '00:00', replyCooldownSec: 30, memoryReview: false })
+  let preStep
+  registerMemoryRecall({ on(name, handler) { assert.equal(name, 'agent/pre-step'); preStep = handler } }, store)
   t.after(async () => { await service.close(); store.close(); rmSync(directory, { recursive: true, force: true }) })
   const post = (input, notify = true) => {
     const item = store.feed.create({ author: 'user', ...input })
@@ -63,7 +68,12 @@ function fixture(t) {
     emit('turn/end', { turn: 1, reason: { kind: 'completed' } })
     await delay(0)
   }
-  return { service, store, sends, creates, cancels, post, run, finish }
+  const recall = (current, { admit = messages => messages, session, step = 1 } = {}) => {
+    const message = createUserMessage({ source: { kind: 'user' }, content: [{ type: 'text', text: current.prompt }] })
+    return preStep({ agent: { id: current.binding.sessionId, session }, messages: [message], turn: 1, step,
+      signal: new AbortController().signal }, async () => ({ kind: 'enter', messages: admit([message]) }))
+  }
+  return { service, store, sends, creates, cancels, post, run, finish, recall }
 }
 
 test('reactive prompt preserves current input and bounds old thread data', t => {
@@ -142,6 +152,87 @@ test('an owner comment on her own post can receive a reply after the normal cool
   await h.service.tick()
   assert.equal(h.sends.length, 1)
   assert.equal(h.store.taskById(followup.job.id).status, 'accepted')
+})
+
+test('private feed replies receive bounded shared facts only on the admitted turn and keep traceable sources', async t => {
+  const h = fixture(t)
+  const root = h.store.feed.create({ author: 'companion', body: '溪边茶肆的两段都已经核对。' })
+  const { job } = h.post({ parentId: root.id, body: '溪边茶肆旁的约定还记得吗？' })
+  const create = (content, options = {}) => h.store.memory.create({ kind: 'goal', scope: 'shared', status: 'active',
+    contextId: 'chat.mobile', content, ...options })
+  const fromPhone = create('溪边茶肆旁约定留一棵白桦树。', { importance: 1 })
+  const fromGame = create('溪边茶肆旁的约定还有留一盏灯。', { contextId: 'game.minecraft', importance: 1 })
+  const inScope = create('溪边茶肆旁的约定私密样例。', { contextId: job.contextId, scope: 'context', importance: 1 })
+  const candidate = create('溪边茶肆旁的约定候选样例。', { status: 'candidate' })
+  const extra = create('溪边茶肆还有一条较弱的共享线索。', { importance: 0.05, confidence: 0.05 })
+  create('山顶营地用深色木板。', { importance: 1, pinned: true })
+  const current = await h.run(job)
+  const payload = h.store.autonomy.get(job.id).payload
+  assert.deepEqual(new Set(payload.memoryRefs.map(ref => ref.id)), new Set([fromPhone.id, fromGame.id]))
+  assert.equal(payload.reviewSessionId, current.binding.sessionId)
+  assert.doesNotMatch(current.prompt, /白桦树|留一盏灯/u)
+  assert.equal((await h.recall(current, { admit: () => [] })).kind, 'reject')
+  assert.equal(h.store.memory.get(fromPhone.id).recallCount, 0)
+
+  const session = Session.create(SessionId(current.binding.sessionId))
+  const admitted = await h.recall(current, { session })
+  assert.equal(admitted.kind, 'enter')
+  assert.equal(admitted.messages.length, 2)
+  const recall = admitted.messages[1]
+  assert.equal(recall.source.kind, 'companion-memory')
+  const text = recall.content[0].text
+  assert.match(text, /白桦树/u)
+  assert.match(text, /留一盏灯/u)
+  assert.doesNotMatch(text, /私密样例|候选样例|较弱的共享线索|山顶营地/u)
+  assert.ok(!text.includes(fromPhone.id) && !text.includes(fromGame.id))
+  for (const item of [inScope, candidate, extra]) assert.equal(h.store.memory.get(item.id).recallCount, 0)
+  assert.equal(h.store.memory.get(fromPhone.id).recallCount, 1)
+  assert.equal(h.store.memory.get(fromPhone.id).reinforcementCount, 0)
+  const activity = h.store.activities().find(item => item.kind === 'memory.recalled' && item.contextId === job.contextId)
+  assert.deepEqual(new Set(activity.data.memoryIds), new Set([fromPhone.id, fromGame.id]))
+  session.append('user/message', recall, { surfaceOp: 'append' })
+  assert.equal((await h.recall(current, { session, step: 2 })).kind, 'reject')
+  assert.doesNotMatch(session.deriveMessages()[0].content[0].text, /白桦树|留一盏灯/u)
+
+  await h.finish(current, JSON.stringify({ decision: 'reply', body: '记得，茶肆旁给白桦树和那盏灯留好位置。' }))
+  const reply = h.store.feed.get(root.id).replies.at(-1)
+  assert.equal(reply.author, 'companion')
+  assert.match(reply.body, /白桦树/u)
+  assert.equal(h.store.autonomy.get(job.id).task.status, 'succeeded')
+})
+
+test('revising or withdrawing a recalled fact blocks the old draft and re-evaluates with current authorization', async t => {
+  for (const [name, update, expected] of [
+    ['corrected', { content: '茶肆的种树约定改成樱花。' }, /改成樱花/u],
+    ['private', { scope: 'context' }, undefined],
+    ['forgotten', { status: 'forgotten' }, undefined],
+  ]) await t.test(name, async sub => {
+    const h = fixture(sub)
+    const { item, job } = h.post({ body: '茶肆的种树约定是什么？' })
+    const fact = h.store.memory.create({ kind: 'goal', contextId: 'game.minecraft', status: 'active', scope: 'shared', confidence: 1,
+      content: '茶肆的种树约定是白桦。' })
+    const first = await h.run(job)
+    assert.match((await h.recall(first)).messages[1].content[0].text, /白桦/u)
+    h.store.memory.update(fact.id, update)
+    assert.equal((await h.recall(first)).kind, 'reject')
+    assert.throws(() => h.store.feed.create({ parentId: item.id, author: 'companion', body: '是白桦。',
+      contextId: job.contextId, sourceTaskId: job.id, sourceSessionId: first.binding.sessionId }), /memories have changed/u)
+    await h.finish(first, JSON.stringify({ decision: 'reply', body: '是白桦。' }))
+    assert.equal(h.store.feed.get(item.id).replies.length, 0)
+    assert.equal(h.store.autonomy.get(job.id).task.status, 'accepted')
+    assert.equal(h.store.autonomy.get(job.id).lastError, 'feed-reply-memory-changed')
+
+    const next = await h.run(job)
+    assert.notEqual(next.binding.sessionId, first.binding.sessionId)
+    const admitted = await h.recall(next)
+    assert.equal(admitted.kind, 'enter')
+    if (expected) assert.match(admitted.messages[1].content[0].text, expected)
+    else assert.equal(admitted.messages.length, 1)
+    assert.ok(admitted.messages.every(message => !message.content[0].text.includes('白桦')))
+    await h.finish(next, JSON.stringify({ decision: 'reply', body: expected ? '改成樱花了。' : '这次你想种什么？' }))
+    assert.equal(h.store.feed.get(item.id).replies.length, 1)
+    assert.equal(h.store.autonomy.get(job.id).task.status, 'succeeded')
+  })
 })
 
 test('silence, unsafe proposals and withdrawn authority do not publish', async t => {

@@ -7,11 +7,13 @@ import { setTimeout as delay } from 'node:timers/promises'
 import test from 'node:test'
 import { WebSocket } from 'ws'
 import { BILIBILI_AUTONOMY_CONTEXT, BILIBILI_CLIP_CONTEXT, BILIBILI_REFLECTION_CONTEXT, BILIBILI_SHARE_CONTEXT, DAILY_AUTONOMY_CONTEXT, DAILY_REFLECTION_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_SHARE_CONTEXT } from '../src/core/model.ts'
+import { BILIBILI_WATCH_EVENT } from '../src/core/bilibili.ts'
 import { CompanionStore } from '../src/core/store.ts'
 import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY } from '../src/core/minecraft-house-project.ts'
 import { deviceActivity, deviceContextAllowed, registerDeviceHttp } from '../src/host/device-http.ts'
 import { DeviceService } from '../src/host/devices.ts'
 import { EventHub } from '../src/host/events.ts'
+import { QwenWatchService } from '../src/host/qwen-watch.ts'
 
 const deviceRoot = '/companion-device/api'
 const chat = 'chat.mobile'
@@ -70,7 +72,8 @@ async function setup(t) {
   })
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   origin = 'http://127.0.0.1:' + server.address().port
-  const { credential } = devices.redeem(devices.createOffer({ routes: [origin] }).link)
+  const pair = () => devices.redeem(devices.createOffer({ routes: [origin] }).link)
+  const { credential } = pair()
   const hub = new EventHub(ctx, store, {
     path: deviceRoot + '/events', authorize: req => devices.authorize(req), contextAllowed: deviceContextAllowed, projectActivity: deviceActivity,
   })
@@ -85,8 +88,8 @@ async function setup(t) {
     store.close()
     await rm(root, { recursive: true, force: true })
   })
-  const request = (path, data, method = data === undefined ? 'GET' : 'POST') => fetch(origin + deviceRoot + path, {
-    method, headers: { authorization: credential, ...(data === undefined ? {} : { 'content-type': 'application/json' }) },
+  const request = (path, data, method = data === undefined ? 'GET' : 'POST', auth = credential) => fetch(origin + deviceRoot + path, {
+    method, headers: { authorization: auth, ...(data === undefined ? {} : { 'content-type': 'application/json' }) },
     body: data === undefined ? undefined : JSON.stringify(data),
   })
   function connect(contextId) {
@@ -97,8 +100,70 @@ async function setup(t) {
     socket.on('message', bytes => frames.push(JSON.parse(bytes)))
     return { socket, frames }
   }
-  return { request, connect, store, called, hub, privateTtsId, publicHistory, sessionRoots }
+  return { request, connect, store, called, hub, privateTtsId, publicHistory, sessionRoots, runtime, pair }
 }
+
+test('paired co-watch restores a private thread and shares only a verified excerpt when requested', async t => {
+  const { request, runtime, store, pair } = await setup(t)
+  let samples = 0
+  let calls = 0
+  const watch = new QwenWatchService({
+    async sampleOmniClip(input) {
+      samples++
+      assert.deepEqual(input, { bvid: 'BV1xx411c7mD', part: 2, start: 12, seconds: 4, mode: 'audio' })
+      return { title: '茶肆配乐', format: 'wav', data: Buffer.from('fixture audio') }
+    },
+  }, store, async (_, options) => {
+    calls++
+    assert.match(JSON.parse(options.body).messages.at(-1).content[0].input_audio.data, /^data:;base64,/u)
+    return Response.json({ choices: [{ message: { content: '听见两下私有样例铃声' } }] })
+  }, { QWENCLOUD_API_KEY: 'loopback-fixture' })
+  runtime.qwenWatch = watch
+  t.after(() => watch.close())
+
+  const clip = '看这段 https://www.bilibili.com/video/BV1xx411c7mD/?p=2 12 4秒 声音'
+  assert.deepEqual(await (await request('/bilibili/watch')).json(), { thread: null })
+  const first = await request('/bilibili/watch', { clip, question: '我的私有共看问题' })
+  assert.equal(first.status, 200)
+  const { threadId, receipt } = await first.json()
+  const { activityId, ...publicData } = receipt
+  const reopened = await (await request('/bilibili/watch')).json()
+  assert.deepEqual(reopened.thread, { threadId, receipt,
+    turns: [{ role: 'user', content: '我的私有共看问题' }, { role: 'assistant', content: '听见两下私有样例铃声' }] })
+  const other = pair().credential
+  assert.deepEqual(await (await request('/bilibili/watch', undefined, 'GET', other)).json(), { thread: null })
+  const rejected = await request('/bilibili/watch', { threadId, question: '别的设备问' }, 'POST', other)
+  assert.equal(rejected.status, 409)
+  assert.equal((await request('/bilibili/watch', { threadId, question: '再听到了什么？' })).status, 200)
+  assert.equal(samples, 1)
+  assert.equal(calls, 2)
+  assert.equal(store.activities().filter(event => event.kind === BILIBILI_WATCH_EVENT).length, 1)
+  const state = await (await request('/state')).json()
+  assert.deepEqual(state.bilibiliWatch, { version: 1, ready: true, resume: true })
+  assert.deepEqual(state.activities.find(event => event.id === activityId)?.data, publicData)
+  assert.equal(state.activities.find(event => event.id === activityId)?.kind, 'video.watched')
+  assert.doesNotMatch(JSON.stringify(state), new RegExp(`我的私有共看问题|私有样例铃声|${threadId}`, 'u'))
+  assert.equal(store.memory.list({ status: 'all' }).length, 0)
+
+  const legacyId = store.recordActivity({ source: 'media.bilibili', contextId: 'world.bilibili',
+    kind: 'video.watched', status: 'success', summary: '旧记录', data: publicData })
+  assert.equal((await request('/bilibili/watch/remember', { activityId: legacyId })).status, 404)
+  watch.close()
+  assert.deepEqual(await (await request('/bilibili/watch')).json(), { thread: null })
+  assert.equal((await request('/bilibili/watch/remember', { activityId })).status, 201)
+  assert.equal((await request('/bilibili/watch/remember', { activityId })).status, 200)
+  const memories = store.memory.find('茶肆配乐', { contextId: chat })
+  assert.equal(memories.length, 1)
+  assert.match(memories[0].content, /第 2 P，从 12 秒起的 4 秒片段（声音）/u)
+  assert.doesNotMatch(memories[0].content, /私有|铃声/u)
+  assert.deepEqual(memories[0].sourceRefs, [{ contextId: 'world.bilibili', activityId }])
+  store.memory.update(memories[0].id, { kind: 'event', contextId: chat, status: 'forgotten' })
+  const withdrawn = await request('/bilibili/watch/remember', { activityId })
+  assert.equal(withdrawn.status, 409)
+  assert.equal((await withdrawn.json()).code, 'bili-watch-memory-withdrawn')
+  assert.deepEqual(store.memory.find('茶肆配乐', { contextId: chat }), [])
+  assert.equal(store.memory.list({ status: 'all' }).length, 1)
+})
 
 test('paired HTTP cannot read, write, or synthesize private decision sessions', async t => {
   const { request, store, called, privateTtsId, publicHistory } = await setup(t)
@@ -230,20 +295,37 @@ test('paired state and live Minecraft recovery expose confirmed work without dai
     externalId: DAILY_HOUSE_PROJECT_TASK_PREFIX + job.id, title: '自主续建西段' })
   const projectId = randomUUID()
   const zoneId = randomUUID()
-  const publicData = { index: 0, built: true, checked: 100, placed: 2, consumed: { spruce_planks: 2 }, recovery: true }
+  const publicData = { projectName: '河边茶肆', index: 0, built: true, checked: 100, placed: 2, consumed: { spruce_planks: 2 }, recovery: true }
   const { frames } = connect()
   await until(() => frames.some(frame => frame.type === 'stream.replay.complete'))
   const activityId = store.recordActivity({ contextId: 'game.minecraft', taskId: child.id, source: 'game.minecraft',
     kind: 'world.house-project-section', summary: '自主施工第 1 区已核对 100 处位置，本次放置 2 块。',
     status: 'success', data: { ...publicData, dailyTaskId: job.id, projectId, zoneId } })
-  await until(() => frames.some(frame => frame.payload.kind === 'world.house-project-section'))
+  const verification = { projectName: '河边茶肆', matched: true, checked: 200, unmatchedSections: [] }
+  const oldVerification = { ...verification, matched: false, unmatchedSections: [1] }
+  const sessionId = 'private-project-session'
+  const verifiedId = store.recordActivity({ contextId: 'game.minecraft', sessionId, taskId: child.id, source: 'game.minecraft',
+    kind: 'world.house-project-verification', summary: '整栋成果通过实地核对。', status: 'success',
+    data: { ...verification, projectId, checkedAt: '2026-11-17T00:00:00Z' } })
+  const duplicateId = store.recordActivity({ contextId: 'game.minecraft', taskId: child.id, source: 'game.minecraft',
+    kind: 'world.house-project-verification', summary: '自主流程内部回执。', status: 'success',
+    data: { ...verification, projectId, dailyTaskId: job.id } })
+  const mismatchId = store.recordActivity({ contextId: 'game.minecraft', source: 'game.minecraft',
+    kind: 'world.house-project-verification', summary: '复核发现一处不符。', status: 'warning', data: { ...oldVerification, projectId } })
+  await until(() => frames.some(frame => frame.payload.id === mismatchId))
   const state = await (await request('/state')).json()
   const task = state.tasks.find(value => value.id === child.id)
   assert.equal(task.capabilityId, HOUSE_PROJECT_SECTION_CAPABILITY)
   assert.equal(task.externalId, undefined)
   assert.deepEqual(state.activities.find(value => value.id === activityId).data, publicData)
   assert.deepEqual(frames.find(frame => frame.payload.kind === 'world.house-project-section').payload.data, publicData)
-  for (const privateValue of [job.id, projectId, zoneId, secret]) {
+  for (const list of [state.activities, frames.map(frame => frame.payload)]) {
+    assert.deepEqual(list.find(value => value.id === verifiedId).data, verification)
+    assert.equal(list.find(value => value.id === verifiedId).taskId, undefined)
+    assert.deepEqual(list.find(value => value.id === mismatchId).data, oldVerification)
+    assert.ok(!list.some(value => value.id === duplicateId))
+  }
+  for (const privateValue of [job.id, projectId, zoneId, sessionId, secret]) {
     assert.ok(!JSON.stringify(state).includes(privateValue))
     assert.ok(!JSON.stringify(frames).includes(privateValue))
   }

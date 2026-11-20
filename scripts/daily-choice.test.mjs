@@ -347,6 +347,154 @@ test('an existing same-zone project grant admits one ready section without borro
   assert.equal(h.calls.build.length, 1)
 })
 
+test('a full-project initiative completes every section and binds the whole verification to her choice', async t => {
+  const h = houseWindowFixture(t)
+  h.projectState.offered = [{ section: 1, name: '东翼', fullProject: true }]
+  h.request.allowHouseProjectFull = true
+  const started = []
+  h.minecraft.buildDailyHouseProject = async (projectId, zoneId, offer, signal, assertPermit, lease) => {
+    assert.equal(offer.fullProject, true)
+    assertPermit()
+    const task = h.store.createTask({ capabilityId: 'minecraft.house-project.autonomous', title: '整栋自主续建', contextId: 'game.minecraft',
+      externalId: DAILY_HOUSE_PROJECT_TASK_PREFIX + lease.dailyTaskId })
+    h.store.transitionTask(task.id, 'running')
+    lease.onStarted(task)
+    started.push(task.id)
+    for (const section of [0, 1]) {
+      assertPermit()
+      const child = h.store.createTask({ capabilityId: HOUSE_PROJECT_SECTION_CAPABILITY, title: `第 ${section + 1} 区`, contextId: 'game.minecraft' })
+      assert.equal(h.store.minecraftHouseProjects.start(projectId, section, child.id), true)
+      h.store.transitionTask(child.id, 'running')
+      const receipt = { built: true, zoneId, checked: 64, placed: 64, consumed: {}, creative: true }
+      assert.equal(h.store.minecraftHouseProjects.finish(projectId, section, child.id, { receipt }), true)
+      h.store.transitionTask(child.id, 'succeeded')
+    }
+    const verification = { matched: true, checked: 128, unmatchedSections: [], checkedAt: new Date().toISOString() }
+    h.store.minecraftHouseProjects.verify(projectId, verification)
+    h.store.recordActivity({ contextId: 'game.minecraft', taskId: task.id, source: 'game.minecraft', kind: 'world.house-project-verification',
+      summary: '整栋验收通过', status: 'success', data: { projectId, ...verification, dailyTaskId: lease.dailyTaskId } })
+    h.store.transitionTask(task.id, 'succeeded')
+    return { task, verification }
+  }
+  const turn = await h.open()
+  const signal = new AbortController().signal
+  const view = await h.service.observeDailyInitiative(turn.sessionId, signal)
+  assert.deepEqual(view.options.map(option => option.id), ['house:all', 'defer'])
+  await turn.propose({ option: 'house:all', goal: '想按完整参考设计完成整栋茶肆。', evidenceId: view.evidence[0].id }, signal)
+  await turn.complete()
+  const [job] = h.jobs()
+  assert.equal(job.task.status, 'succeeded')
+  assert.equal(job.payload.houseSection.fullProject, true)
+  assert.equal(job.payload.activityTaskId, started[0])
+  assert.deepEqual(h.store.minecraftHouseProjects.get(h.project.id).sections.map(section => section.status), ['built', 'built'])
+  assert.equal(h.store.minecraftHouseProjects.get(h.project.id).verification.checked, 128)
+  assert.equal(h.calls.build.length, 0)
+})
+
+test('the owner can request the authorized creative project after a deferred choice', async t => {
+  const h = houseWindowFixture(t)
+  h.projectState.offered = [{ section: 1, name: '东翼', fullProject: true }]
+  h.request.allowHouseProjectFull = true
+  h.minecraft.buildDailyHouseProject = async () => assert.fail('construction started before an admitted choice')
+  const ordinary = await h.open()
+  const signal = new AbortController().signal
+  assert.match(h.sent.at(-1).prompt, /主人没有指派任务/u)
+  await h.service.observeDailyInitiative(ordinary.sessionId, signal)
+  await ordinary.propose({ option: 'defer', goal: '稍后再完成整栋房屋。', evidenceId: 'now-1' }, signal)
+  await ordinary.complete()
+  const [deferred] = h.jobs()
+  assert.equal(deferred.task.status, 'cancelled')
+  assert.equal(h.service.resumeDailyHouseProject(randomUUID()), false)
+  assert.equal(h.service.resumeDailyHouseProject(h.project.id), true)
+  await h.wake()
+  assert.equal(h.service.resumeDailyHouseProject(h.project.id), false)
+  assert.match(h.sent.at(-1).prompt, /主人现在明确委托你在 Minecraft 用创造模式接续/u)
+  const directed = h.startInitiative()
+  const observation = await h.service.observeDailyInitiative(directed.sessionId, signal)
+  assert.deepEqual(observation.options.map(option => option.id), ['house:all', 'defer'])
+  assert.equal(observation.pendingGoals, undefined)
+  h.service.revokeSurveyWindow()
+  assert.equal(h.service.resumeDailyHouseProject(h.project.id), false)
+})
+
+test('cancelled full builds resume with fresh continuation goals and preserve the old failures', async t => {
+  const h = houseWindowFixture(t)
+  h.projectState.offered = [{ section: 1, name: '东翼', fullProject: true }]
+  h.request.allowHouseProjectFull = true
+  let attempts = 0
+  h.minecraft.buildDailyHouseProject = async (projectId, zoneId, offer, signal, assertPermit, lease) => {
+    if (attempts++ < 2) {
+      const task = h.store.createTask({ capabilityId: 'minecraft.house-project.autonomous', title: '中断的整栋续建', contextId: 'game.minecraft',
+        externalId: DAILY_HOUSE_PROJECT_TASK_PREFIX + lease.dailyTaskId })
+      h.store.transitionTask(task.id, 'running')
+      lease.onStarted(task)
+      h.service.cancelDailyChoice(undefined, 'daily-house-project-cancelled')
+      throw new Error('cancelled-for-resume-test')
+    }
+    assertPermit()
+    const task = h.store.createTask({ capabilityId: 'minecraft.house-project.autonomous', title: '整栋续建', contextId: 'game.minecraft',
+      externalId: DAILY_HOUSE_PROJECT_TASK_PREFIX + lease.dailyTaskId })
+    h.store.transitionTask(task.id, 'running')
+    lease.onStarted(task)
+    for (const section of [0, 1]) {
+      const child = h.store.createTask({ capabilityId: HOUSE_PROJECT_SECTION_CAPABILITY, title: `第 ${section + 1} 区`, contextId: 'game.minecraft' })
+      h.store.minecraftHouseProjects.start(projectId, section, child.id)
+      h.store.transitionTask(child.id, 'running')
+      const receipt = { built: true, zoneId, checked: 64, placed: 64, consumed: {}, creative: true }
+      h.store.minecraftHouseProjects.finish(projectId, section, child.id, { receipt })
+      h.store.transitionTask(child.id, 'succeeded')
+    }
+    const verification = { matched: true, checked: 128, unmatchedSections: [], checkedAt: new Date().toISOString() }
+    h.store.minecraftHouseProjects.verify(projectId, verification)
+    h.store.recordActivity({ contextId: 'game.minecraft', taskId: task.id, source: 'game.minecraft', kind: 'world.house-project-verification',
+      summary: '整栋续建验收通过', status: 'success', data: { projectId, ...verification, dailyTaskId: lease.dailyTaskId } })
+    h.store.transitionTask(task.id, 'succeeded')
+    return { task, verification }
+  }
+  const first = await h.open()
+  const signal = new AbortController().signal
+  await h.service.observeDailyInitiative(first.sessionId, signal)
+  await first.propose({ option: 'house:all', goal: '第一次尝试整栋续建。', evidenceId: 'now-1' }, signal)
+  await first.complete()
+  const [cancelled] = h.jobs()
+  assert.equal(cancelled.task.status, 'cancelled')
+  assert.equal(cancelled.task.error, 'daily-house-project-cancelled')
+  assert.equal(h.service.resumeDailyHouseProject(h.project.id), true)
+  await h.wake()
+  const second = h.startInitiative()
+  await h.service.observeDailyInitiative(second.sessionId, signal)
+  await second.propose({ option: 'house:all', goal: '接着上次中断的位置继续完成。', evidenceId: 'now-1' }, signal)
+  await second.complete()
+  const interrupted = h.jobs().find(job => job.dedupeKey.includes(`:continue:${h.project.id}`))
+  assert.equal(interrupted.task.status, 'cancelled')
+  assert.notEqual(interrupted.id, cancelled.id)
+  const previousRuleId = h.service.surveyWindowView().rule.id
+  h.service.revokeSurveyWindow()
+  h.now(0, 0, 10)
+  h.service.updateSettings({ quietStart: '02:00', quietEnd: '08:00' })
+  const renewed = h.service.setSurveyWindow({ ...h.request, start: '00:00', end: '02:00', days: 1 }).rule
+  assert.notEqual(renewed.id, previousRuleId)
+  const scheduled = h.jobs().find(job => job.payload.windowRuleId === renewed.id)
+  assert.ok(scheduled, h.service.view().lastError)
+  assert.equal(scheduled.payload.windowRuleId, renewed.id)
+  h.service.cancelDailyChoice(undefined, 'daily-house-project-foreground')
+  assert.equal(h.service.resumeDailyHouseProject(h.project.id), true, h.service.view().lastError)
+  for (let i = 0; i < 5 && h.jobs().some(job => job.dedupeKey.includes(':continue:') && job.task.status === 'accepted'); i++) await h.wake()
+  const third = h.startInitiative()
+  await h.service.observeDailyInitiative(third.sessionId, signal)
+  await third.propose({ option: 'house:all', goal: '修好问题后继续完成整栋茶肆。', evidenceId: 'now-1' }, signal)
+  await third.complete()
+  const resumed = h.jobs().find(job => job.dedupeKey.startsWith(`daily:2026-11-10:continue:${h.project.id}:`))
+  assert.equal(resumed.task.status, 'succeeded')
+  assert.equal(resumed.payload.continuationId, resumed.dedupeKey.slice(-36))
+  assert.equal(resumed.payload.windowRuleId, renewed.id)
+  assert.notEqual(resumed.id, scheduled.id)
+  assert.notEqual(resumed.dedupeKey, interrupted.dedupeKey)
+  assert.equal(h.jobs().some(job => job.id === cancelled.id && job.task.status === 'cancelled'), true)
+  assert.equal(h.jobs().some(job => job.id === interrupted.id && job.task.status === 'cancelled'), true)
+  assert.deepEqual(h.store.minecraftHouseProjects.get(h.project.id).sections.map(section => section.status), ['built', 'built'])
+})
+
 test('an admitted house initiative consumes the window on missing proof, rest or cancellation', async t => {
   for (const scenario of ['no native receipt', 'rest', 'missing world proof', 'revoke during work', 'foreground during work', 'expired during work']) {
     await t.test(scenario, async t => {
@@ -691,6 +839,99 @@ test('a legacy-shaped deferred goal survives restart, can be revised, and closes
   assert.equal(next.pendingGoals, undefined)
   await third.complete()
   assert.equal(h.game.length, 1)
+})
+
+test('an authored goal carries confirmed progress across restart and defer, then closes after the final action', async t => {
+  const h = fixture(t)
+  h.input.days = 4
+  h.service.updateSettings({ dailyInitiativeEnabled: true })
+  const { name, tagline } = h.store.persona()
+  const persona = h.store.savePersona({ name, tagline, description: '先确认回营的路，再放心去更远的地方。' })
+  const goal = '我想确认两条从营地出发、可以原路回来的小路。'
+  const signal = new AbortController().signal
+  await h.open({ candidate: false })
+  assert.ok(h.sent.at(-1).prompt.includes(persona.description))
+  assert.match(h.sent.at(-1).prompt, /keepGoalOpen/u)
+  const first = h.startInitiative()
+  await h.service.observeDailyInitiative(first.sessionId, signal)
+  await first.propose({ goal, option: 'survey:north', evidenceId: 'now-1', keepGoalOpen: true }, signal)
+  assert.equal(h.game.length, 0)
+  await first.complete()
+  const [scout] = h.jobs()
+  assert.equal(scout.task.status, 'succeeded')
+  assert.equal(scout.payload.initiative.keepGoalOpen, true)
+  assert.equal(h.game.length, 1)
+
+  await h.reopen()
+  await h.wake()
+  assert.equal(h.sent.length, 1)
+  const updated = h.store.savePersona({ name, tagline, description: '留心路上能辨认的地标。' })
+  h.now(12, 0, 10)
+  await h.wake()
+  assert.ok(h.sent.at(-1).prompt.includes(updated.description))
+  assert.ok(!h.sent.at(-1).prompt.includes(persona.description))
+  const second = h.startInitiative()
+  const view = await h.service.observeDailyInitiative(second.sessionId, signal)
+  const pending = { id: 'goal-1', goal,
+    lastConfirmedStep: { at: scout.task.updatedAt, summary: '在 Minecraft 从营地向北步行 5 格探索，然后沿原路安全返回。' } }
+  assert.deepEqual(view.pendingGoals, [pending])
+  assert.ok(!JSON.stringify(view).includes(scout.id))
+  await second.propose({ option: 'defer', previousId: 'goal-1', evidenceId: 'now-1' }, signal)
+  await second.complete()
+  const deferred = h.jobs().find(job => job.payload.initiative?.option === 'defer')
+  assert.equal(deferred.task.status, 'cancelled')
+  assert.equal(h.game.length, 1)
+
+  h.now(12, 0, 11)
+  await h.wake()
+  const third = h.startInitiative()
+  const next = await h.service.observeDailyInitiative(third.sessionId, signal)
+  assert.deepEqual(next.pendingGoals, [pending])
+  await third.propose({ option: 'trail:north-east', previousId: 'goal-1', evidenceId: 'now-2' }, signal)
+  await third.complete()
+  const done = h.jobs().find(job => job.payload.initiative?.option === 'trail:north-east')
+  assert.equal(done.task.status, 'succeeded')
+  assert.deepEqual(done.payload.initiative.previous, { taskId: deferred.id, goal, expiresAt: Date.parse(scout.task.createdAt) + 7 * 86_400_000 })
+  assert.deepEqual(h.game, [{ zoneId: h.zone.id, direction: 'north', steps: 5 }, { zoneId: h.zone.id, trail: 'north-east' }])
+
+  h.now(12, 0, 12)
+  await h.wake()
+  const last = h.startInitiative()
+  assert.equal((await h.service.observeDailyInitiative(last.sessionId, signal)).pendingGoals, undefined)
+  await last.complete()
+  assert.equal(h.game.length, 2)
+  assert.ok(h.memory().every(memory => !memory.content.includes(goal)))
+})
+
+test('withdrawing a Bilibili attachment removes its confirmed step from view and preserves the goal', async t => {
+  const h = fixture(t)
+  h.service.updateSettings({ dailyInitiativeEnabled: true })
+  const item = await h.open()
+  const provenance = { kind: 'owner-supplied', sha256: 'a'.repeat(64) }
+  assert.ok(h.store.bilibiliSubtitles.save({ bvid: item.bvid, part: item.part, cid: 1, format: 'vtt', sha256: provenance.sha256, cueCount: 1,
+    excerpt: { status: 'excerpt', language: 'zh', cues: [CUE], truncated: false, provenance } }))
+  h.mockRead((input, context) => h.readReceipt(input, context, provenance))
+  const first = h.startInitiative()
+  const signal = new AbortController().signal
+  const goal = '我想先读一段码头的故事，再去营地看看海边。'
+  const { evidence } = await h.service.observeDailyInitiative(first.sessionId, signal)
+  await first.propose({ goal, option: 'read:1', evidenceId: evidence.find(item => item.text.includes('B 站')).id, keepGoalOpen: true }, signal)
+  await first.complete()
+  const [read] = h.jobs()
+  assert.equal(read.task.status, 'succeeded')
+  assert.match(read.payload.initiativeOutcome, /字幕阅读回执/u)
+  assert.ok(verifiedDailyReflectionSource(h.store, read.id))
+  assert.equal(h.store.bilibiliSubtitles.remove(item.bvid, item.part), true)
+  h.service.bilibiliSubtitleChanged(item.bvid, item.part)
+
+  h.now(12, 0, 10)
+  await h.wake()
+  const second = h.startInitiative()
+  const view = await h.service.observeDailyInitiative(second.sessionId, signal)
+  assert.deepEqual(view.pendingGoals, [{ id: 'goal-1', goal }])
+  assert.ok(!JSON.stringify(view).includes(item.bvid))
+  assert.ok(!JSON.stringify(view).includes(CUE.text))
+  await second.complete()
 })
 
 test('she can abandon a pending goal when there is no available world action', async t => {
@@ -1568,6 +1809,7 @@ test('both worlds save an optional private observation with exact receipt and as
     const review = h.sent.at(-1)
     assert.equal(review.receipt.contextId, DAILY_REFLECTION_CONTEXT)
     assert.notEqual(review.receipt.sessionId, h.sent[0].receipt.sessionId)
+    assert.ok(review.prompt.includes(`当前角色档案（第 ${persona.version} 版）`))
     assert.ok(!review.prompt.includes(CUE.text) && !review.prompt.includes('Private camp label') && !review.prompt.includes('待选视频'))
     assert.match(review.prompt, kind === 'survey' ? /向北步行 5 格/u : /B 站视频的字幕摘录/u)
     assert.doesNotMatch(review.prompt, /BV[A-Za-z0-9]{10}/u)

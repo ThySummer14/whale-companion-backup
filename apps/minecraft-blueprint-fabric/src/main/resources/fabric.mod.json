@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "companion_blueprints",
+  "version": "1.0.0",
+  "name": "Companion Blueprints",
+  "description": "Console-only inspected creative placement for approved Companion voxel blueprints",
+  "environment": "server",
+  "entrypoints": {"main": ["companion.blueprint.CompanionBlueprints"]},
+  "depends": {
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "fabricloader": ">=0.17.2",
+    "fabric-api": "*",
+    "carpet": "*"
+  }
+}

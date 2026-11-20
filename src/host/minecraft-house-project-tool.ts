@@ -1,7 +1,7 @@
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { defineTool, ToolArgsError, type ToolRunContext } from '@deepseek-ai/dsh-tools'
 import { z } from 'zod'
-import { HouseProjectPlanInput, PROJECT_MAX_SECTIONS, houseProjectCanPrepare, houseProjectPlanMatches } from '../core/minecraft-house-project.ts'
+import { HouseProjectPlanInput, houseProjectCanPrepare, houseProjectPlanMatches } from '../core/minecraft-house-project.ts'
 import { isChatAttachment } from './chat-attachments.ts'
 import type { MinecraftService } from './minecraft.ts'
 
@@ -50,7 +50,7 @@ export function createMinecraftHouseProjectTool(minecraft: HouseProjectPlanningH
       choice: { type: 'object', additionalProperties: false, description: 'Only for submit. Ground the choice in this turn’s inspection.', properties: {
         action: { type: 'string', enum: ['build', 'prepare', 'wait'], required: true,
           description: 'Recommend a ready section, prepare a measured shortage, or wait to address a blocker.' },
-        section: { type: 'integer', description: `Zero-based observed section index, 0–${PROJECT_MAX_SECTIONS - 1}. Required for build and prepare. Optional for wait.` },
+        section: { type: 'integer', description: 'Zero-based observed section index. Required for build and prepare. Optional for wait.' },
         reason: { type: 'string', required: true, description: 'One line of 6–240 characters explaining the observed evidence.' },
       } },
     },

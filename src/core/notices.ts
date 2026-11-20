@@ -130,4 +130,16 @@ export class DeviceNoticeRepository {
       return this.summary(deviceId)
     })
   }
+
+  markGroupRead(deviceId: string, ids: number[]): DeviceNoticeSummary | undefined {
+    if (!ids.length || ids.length > 200 || !ids.every(noticeId)) return
+    return this.hooks.transaction(() => {
+      const insert = this.db.prepare(`INSERT INTO device_notice_read (device_id,notice_id)
+        SELECT d.id,n.id ${device} JOIN device_notice n ON ${visible}
+        WHERE ${activeDevice} AND n.id=? AND NOT ${read}
+        ON CONFLICT(device_id,notice_id) DO NOTHING`)
+      for (const id of ids) insert.run(deviceId, id)
+      return this.summary(deviceId)
+    })
+  }
 }

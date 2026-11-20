@@ -21,6 +21,10 @@ export function minecraftOwnerEventKey(event: MinecraftOwnerEvent): string {
 }
 
 export function minecraftOwnerMessageText(text: string): string {
+  if (text.startsWith('Minecraft 服务端回执：')) {
+    const ownerLine = text.indexOf(`\n${MINECRAFT_OWNER_MESSAGES}`)
+    if (ownerLine >= 0) text = text.slice(ownerLine + 1)
+  }
   if (!text.startsWith(MINECRAFT_OWNER_MESSAGES)) return text
   try {
     const messages: unknown = JSON.parse(text.slice(MINECRAFT_OWNER_MESSAGES.length))

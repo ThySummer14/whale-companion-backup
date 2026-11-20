@@ -10,6 +10,7 @@ import { MediaService } from '../src/host/media.ts'
 import { SingingService, SINGING_CHAT_COVER_ID_PREFIX } from '../src/host/singing.ts'
 import { AceStepSingingProvider } from '../src/host/singing-provider.ts'
 import { registerSingingTools } from '../src/host/singing-tools.ts'
+import { normalizeSongPeak } from '../src/host/song-mix.ts'
 import { companionToolPolicy } from '../src/host/tool-policy.ts'
 import { MAX_SINGING_WAV_BYTES } from '../src/protocol/singing.ts'
 import { MAX_SINGING_MIDI_BYTES } from '../src/protocol/singing-midi.ts'
@@ -94,7 +95,7 @@ test('the workbench authorizes song tasks, serves verified WAV ranges and refuse
   const partial = await fetch(audio, { headers: { ...headers, range: 'bytes=42-55' } })
   assert.equal(partial.status, 206)
   assert.equal(partial.headers.get('content-range'), `bytes 42-55/${bytes.length}`)
-  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), bytes.subarray(42, 56))
+  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), normalizeSongPeak(bytes).subarray(42, 56))
   const head = await fetch(audio, { method: 'HEAD', headers })
   assert.equal(head.status, 200)
   assert.equal(head.headers.get('content-type'), 'audio/wav')

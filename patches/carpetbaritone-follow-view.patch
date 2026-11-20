@@ -1,0 +1,27 @@
+diff --git a/src/main/java/baritone/process/FollowProcess.java b/src/main/java/baritone/process/FollowProcess.java
+--- a/src/main/java/baritone/process/FollowProcess.java
++++ b/src/main/java/baritone/process/FollowProcess.java
+@@ -36,9 +36,20 @@
+     }
+ 
+     public void serverTick() {
+-        // PathingControlManager already consumes onTick and submits the
+-        // asynchronous calculation. A second calculation here would be both
+-        // redundant and a server-thread stall.
++        if (into || lastGoal == null || baritone.isPathing()
++                || !lastGoal.isInGoal(baritone.getPlayerContext().playerFeet())) {
++            return;
++        }
++        var player = baritone.getPlayerContext().player();
++        var input = baritone.getInputController();
++        if (player.onGround() && !player.isInWater() && !player.isUsingItem()
++                && player.getDeltaMovement().horizontalDistanceSqr() <= 0.0004D
++                && !input.isEmergencyMovementActive() && !input.hasActiveBreakTarget()
++                && player.getXRot() > 45.0F) {
++            // A completed movement can leave its steep downward look on the fake player.
++            input.setTargetRotation(null);
++            player.setXRot(0.0F);
++        }
+     }
+ 
+     @Override

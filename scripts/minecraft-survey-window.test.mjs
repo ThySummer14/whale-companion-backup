@@ -262,7 +262,7 @@ test('v24 survey rules stay unchanged and a daily choice persists with a date-un
   } finally { reopened.close() }
   const current = new DatabaseSync(path, { readOnly: true })
   try {
-    assert.equal(current.prepare('PRAGMA user_version').get().user_version, 44)
+    assert.equal(current.prepare('PRAGMA user_version').get().user_version, 49)
     assert.equal(current.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
     assert.deepEqual(current.prepare('PRAGMA foreign_key_check').all(), [])
   } finally { current.close() }
@@ -317,7 +317,7 @@ test('a persisted v27 login window does not acquire supply permission during v28
   finally { reopened.close() }
   const current = new DatabaseSync(path, { readOnly: true })
   try {
-    assert.equal(current.prepare('PRAGMA user_version').get().user_version, 44)
+    assert.equal(current.prepare('PRAGMA user_version').get().user_version, 49)
     assert.equal(current.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')
     assert.deepEqual(current.prepare('PRAGMA foreign_key_check').all(), [])
   } finally { current.close() }

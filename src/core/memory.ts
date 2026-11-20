@@ -18,6 +18,7 @@ export interface MemoryWrite {
 
 export interface MemoryListOptions {
   status?: MemoryStatus | 'active+candidate' | 'all'
+  scope?: MemoryScope
   kind?: MemoryKind
   contextId?: string
   pinned?: boolean
@@ -145,6 +146,15 @@ export class MemoryRepository {
     return row ? this.fromRow(row) : undefined
   }
 
+  experienceCreatedFromActivity(contextId: string, activityId: number): MemoryRecord | undefined {
+    const row = this.db.prepare(`SELECT m.* FROM memory_revision r JOIN memory m ON m.id=r.memory_id
+      WHERE r.revision=1 AND json_extract(r.snapshot,'$.kind')='experience'
+      AND json_extract(r.snapshot,'$.contextId')=?
+      AND EXISTS (SELECT 1 FROM json_each(r.snapshot,'$.sourceRefs') WHERE json_extract(value,'$.activityId')=?)
+      ORDER BY r.id LIMIT 1`).get(contextId, activityId)
+    return row ? this.fromRow(row) : undefined
+  }
+
   private filter(options: MemoryListOptions): { where: string; parameters: (string | number)[] } {
     const conditions: string[] = []
     const parameters: (string | number)[] = []
@@ -158,6 +168,10 @@ export class MemoryRepository {
     if (options.kind) {
       conditions.push('kind=?')
       parameters.push(options.kind)
+    }
+    if (options.scope) {
+      conditions.push('scope=?')
+      parameters.push(options.scope)
     }
     if (options.contextId) {
       conditions.push("(scope='shared' OR context_id=?)")

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { CbiWorld } from './cbi-world.ts'
-import { configuredWardrobe, ysmWardrobeAvailable, ysmWardrobeReceipt, ysmWardrobeStateLine } from './wardrobe.ts'
+import { BPM_MODEL_NBT, configuredWardrobe, ysmWardrobeAvailable, ysmWardrobeReceipt, ysmWardrobeStateLine } from './wardrobe.ts'
 
 const models = [
   { id: 'blue', label: '蓝色大肥鱼', modelId: 'wardrobe:蓝色大肥鱼' },
@@ -83,6 +83,39 @@ test('online CBI uses one shared probe, hides provider IDs and applies only the 
     readState, `ysm model set ${player} "${models[1].modelId}" -`, readState,
     readState, `ysm model set ${player} "${models[0].modelId}" -`, readState,
   ])
+})
+
+test('native Better Player Model wardrobe requires confirmed model data from its own attachment', async t => {
+  const model = { id: 'blue', label: '蓝色大肥鱼', modelId: 'dafeiyu-blue' }
+  const { world, send, change } = fixture(t, [model])
+  const readBpm = `data get entity ${player} ${BPM_MODEL_NBT}`
+  const select = `ysm model set ${player} "dafeiyu-blue" -`
+  let applySelection = false
+  let appearance = state()
+  send.mock.mockImplementation(async (command, accepts) => {
+    let message
+    switch (command) {
+      case 'help ysm model set': message = help; break
+      case readState: message = 'Found no elements matching ysm'; break
+      case readBpm: message = `${player} has the following entity data: ${appearance}`; break
+      case select:
+        if (applySelection) appearance = state({ modelId: model.modelId, mandatory: true, texture: 'white' })
+        message = 'message.better_player_model.model.set.success'
+        break
+      default: throw new Error(`Unexpected command: ${command}`)
+    }
+    const output = log(message)
+    assert.equal(accepts(output), true)
+    return output
+  })
+  const options = [{ id: model.id, label: model.label }]
+  assert.deepEqual(await world.wardrobe(), { available: true, options })
+  await assert.rejects(change(model.id), /minecraft-wardrobe-unconfirmed/u)
+  applySelection = true
+  const selected = await change(model.id)
+  assert.equal(selected.last.id, model.id)
+  assert.deepEqual(selected.options, options)
+  assert.equal(send.mock.calls.filter(call => call.arguments[0] === select).length, 2)
 })
 
 test('unconfigured, offline and unsupported servers retain clear bounded views without YSM changes', async t => {

@@ -59,7 +59,7 @@ test('a retained archive projects a bounded song card and survives a restart wit
   h.store.feed.create({ author: 'user', body: '听到了。', parentId: post.id })
   assert.equal(h.store.feed.get(post.id).replies.length, 1)
   assert.equal(h.store.media.all().length, 1)
-  assert.equal(h.inspect(db => db.prepare('PRAGMA user_version').get().user_version), 43)
+  assert.equal(h.inspect(db => db.prepare('PRAGMA user_version').get().user_version), 49)
   assert.deepEqual(h.inspect(db => db.prepare('PRAGMA foreign_key_check').all()), [])
   h.reopen()
   assert.deepEqual(h.store.feed.list().items[0].song, song)

@@ -8,6 +8,7 @@ import { CompanionStore } from '../src/core/store.ts'
 import { registerHttp } from '../src/host/http.ts'
 import { SingingService } from '../src/host/singing.ts'
 import { ApplioRvcCoverProvider, SeedVcCoverProvider } from '../src/host/singing-cover.ts'
+import { normalizeSongPeak } from '../src/host/song-mix.ts'
 
 function wav(seconds = 5) {
   const size = seconds * 16_000 * 2
@@ -94,9 +95,14 @@ test('owner cover upload invokes the offline F0 CLI and archives only its bounde
   const accepted = await submit(guide)
   assert.equal(accepted.status, 202)
   const { task } = await accepted.json()
-  for (let attempt = 0; attempt < 60 && ['accepted', 'running'].includes(store.taskById(task.id).status); attempt++) await delay(10)
-  assert.equal(store.taskById(task.id).status, 'succeeded')
-  assert.deepEqual(Buffer.from((await singing.audio(task.id)).data), guide)
+  const deadline = performance.now() + 5_000
+  let completed = store.taskById(task.id)
+  while (['accepted', 'running'].includes(completed.status) && performance.now() < deadline) {
+    await delay(10)
+    completed = store.taskById(task.id)
+  }
+  assert.equal(completed.status, 'succeeded', `Cover task did not succeed: ${completed.error ?? completed.status}`)
+  assert.ok(Buffer.from((await singing.audio(task.id)).data).equals(normalizeSongPeak(guide)))
   const receipt = store.activities().find(item => item.kind === 'song.archived')
   assert.equal(receipt.data.mode, 'cover')
   assert.equal(receipt.data.durationSeconds, 5)

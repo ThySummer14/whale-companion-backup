@@ -32,7 +32,7 @@ function fixture(t) {
     for (const db of stores) db.close()
     rmSync(directory, { recursive: true, force: true })
   })
-  assert.equal(Number(store.db.prepare('PRAGMA user_version').get().user_version), 44)
+  assert.equal(Number(store.db.prepare('PRAGMA user_version').get().user_version), 49)
   assert.deepEqual(store.minecraftHouseProjects.get(project.id), project)
   assert.equal(store.buildZoneById(zone.id).name, zone.name)
   const serviceFor = db => new MinecraftService(db, {}, { dataDir: directory, serverRoot: directory, owner: 'fixture-owner' })

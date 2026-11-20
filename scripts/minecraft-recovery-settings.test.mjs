@@ -90,7 +90,7 @@ test('v39 upgrade retains prior recovery and single placement without granting c
 
   const after = new DatabaseSync(path, { readOnly: true })
   try {
-    assert.equal(after.prepare('PRAGMA user_version').get().user_version, 43)
+    assert.equal(after.prepare('PRAGMA user_version').get().user_version, 49)
     assert.deepEqual(after.prepare('SELECT name,type,sql FROM sqlite_schema ORDER BY name').all(), schema)
     assert.equal(after.prepare("SELECT value FROM state WHERE key='autonomy.settings'").get().value, settings)
     assert.equal(after.prepare('PRAGMA integrity_check').get().integrity_check, 'ok')

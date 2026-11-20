@@ -5,6 +5,7 @@ import { isFeedReplyContext } from '../core/feed-reply.ts'
 import { DAILY_INITIATIVE_OBSERVE_TOOL, DAILY_INITIATIVE_PROPOSE_TOOL } from './daily-initiative-tools.ts'
 import { HOUSE_DRAFT_TOOL } from './minecraft-house-tool.ts'
 import { HOUSE_PROJECT_PLAN_TOOL } from './minecraft-house-project-tool.ts'
+import { VOXEL_BLUEPRINT_TOOL } from './minecraft-voxel-tool.ts'
 import { CHAT_CAPABILITY_TOOL, CHAT_DEFERRED_TOOLS } from './chat-capabilities.ts'
 import { HOUSE_RECOVERY_CANDIDATES_TOOL, HOUSE_RECOVERY_OBSERVE_TOOL, HOUSE_RECOVERY_PLACE_TOOL, HOUSE_RECOVERY_PLAN_TOOL, HOUSE_RECOVERY_VERIFY_TOOL } from './minecraft-recovery-tools.ts'
 
@@ -24,6 +25,7 @@ const AVATAR_TOOLS = [
 ] as const
 const HOUSE_TOOL = [HOUSE_DRAFT_TOOL, '从本轮主人文字或单张参考图拟定私有小屋蓝图', 'minecraft:house-draft'] as const
 const HOUSE_PROJECT_TOOL = [HOUSE_PROJECT_PLAN_TOOL, '按当前工地预检和缺料提出私有下一段施工建议', 'minecraft:project-plan'] as const
+const VOXEL_TOOL = [VOXEL_BLUEPRINT_TOOL, '把本轮主人的体素附件转换为可预览的 Minecraft 图纸', 'minecraft:blueprint-prepare'] as const
 const RECOVERY_TOOLS = [
   [HOUSE_RECOVERY_OBSERVE_TOOL, '核对当前已授权的中断施工现场和缺料', 'minecraft:read'],
   [HOUSE_RECOVERY_PLAN_TOOL, '为当前中断任务记录一份私有下一步方案', 'minecraft:recovery-plan'],
@@ -37,7 +39,7 @@ const INITIATIVE_TOOLS = [
   [DAILY_INITIATIVE_OBSERVE_TOOL, '查看这次自主活动可用的证据和选项', 'initiative:read'],
   [DAILY_INITIATIVE_PROPOSE_TOOL, '根据本次证据提出自己想做的事', 'initiative:propose'],
 ] as const
-const ALL_TOOLS = [...MEMORY_TOOLS, ...FEED_TOOLS, ...WORLD_ACTIONS, HOUSE_TOOL, HOUSE_PROJECT_TOOL, ...RECOVERY_TOOLS, ...RECOVERY_PLACEMENT_TOOLS, RECOVERY_VERIFY_TOOL, ...INITIATIVE_TOOLS, ...AVATAR_TOOLS]
+const ALL_TOOLS = [...MEMORY_TOOLS, ...FEED_TOOLS, ...WORLD_ACTIONS, HOUSE_TOOL, HOUSE_PROJECT_TOOL, VOXEL_TOOL, ...RECOVERY_TOOLS, ...RECOVERY_PLACEMENT_TOOLS, RECOVERY_VERIFY_TOOL, ...INITIATIVE_TOOLS, ...AVATAR_TOOLS]
 
 export function isMinecraftDecisionContext(contextId: string): boolean {
   return contextId === MINECRAFT_SHARE_CONTEXT || contextId === MINECRAFT_SUPPLY_CONTEXT || contextId === MINECRAFT_RECOVERY_CONTEXT
@@ -60,7 +62,7 @@ export function companionToolPolicy(contextId: string, kind: ContextKind, wardro
   const allowed = recovery ? [...RECOVERY_TOOLS, ...(recoveryPlacement ? RECOVERY_PLACEMENT_TOOLS : []),
     ...(recoveryPlacement && recoveryCompletion ? [RECOVERY_VERIFY_TOOL] : [])] : initiative ? INITIATIVE_TOOLS : internal ? [] : feed ? FEED_TOOLS
     : world?.restricted ? [...(world.memory ? MEMORY_TOOLS : []), ...actions]
-    : memory ? [...MEMORY_TOOLS, ...AVATAR_TOOLS, ...actions, ...(kind === 'chat' ? [HOUSE_TOOL, HOUSE_PROJECT_TOOL] : [])] : []
+    : memory ? [...MEMORY_TOOLS, ...AVATAR_TOOLS, ...actions, ...(kind === 'chat' ? [FEED_TOOLS[0], HOUSE_TOOL, HOUSE_PROJECT_TOOL, VOXEL_TOOL] : [])] : []
   const denied = ALL_TOOLS.filter(([name]) => !allowed.some(([visible]) => visible === name)).map(([name]) => name)
   const deferred = kind === 'chat' && memory ? CHAT_DEFERRED_TOOLS : []
   return {

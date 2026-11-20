@@ -7,7 +7,7 @@ import { BILIBILI_AUTONOMY_CONTEXT, BILIBILI_CONTEXT } from '../core/model.ts'
 import type { CompanionStore } from '../core/store.ts'
 import { MAX_BILIBILI_CLIP_SECONDS, MAX_BILIBILI_SUBTITLE_BYTES, type BilibiliClipInput, type BilibiliDiscoveredVideo, type BilibiliReadInput, type BilibiliReadResult, type BilibiliSourceInput, type BilibiliSubtitle, type BilibiliSubtitleDocument, type BilibiliSubtitleUpload } from '../protocol/bilibili.ts'
 import type { LocalAsrProvider } from './asr.ts'
-import { decodeBilibiliAudio, decodeBilibiliFrames, readBilibiliFragment, selectBilibiliTrack, type ByteRange } from './bilibili-dash.ts'
+import { decodeBilibiliAudio, decodeBilibiliFrames, decodeBilibiliVideo, readBilibiliFragment, selectBilibiliTrack, type ByteRange } from './bilibili-dash.ts'
 import { DeviceAuthError } from './devices.ts'
 import type { WorldHealth } from '../protocol/worlds.ts'
 
@@ -237,20 +237,11 @@ export class BilibiliService {
     if (!media || !wantVideo && !wantAudio) return result
     return this.exclusive(signal, async bounded => {
       this.companionReading = true
-      const video = await this.video(input.bvid, bounded)
-      const selected = selectedPage(video, input.part)
-      if (input.start + input.seconds > selected.duration) throw new DeviceAuthError(422, 'bili-clip-outside-part')
-      result.title = plainBilibiliText(video.title, 240)
-      const query = await this.signedQuery(video.bvid, selected.cid, bounded, true)
-      if (!query) throw new DeviceAuthError(422, 'bili-clip-stream-unavailable')
-      const response = await this.api('/x/player/wbi/playurl', query, bounded)
-      if (response.code !== 0) throw upstreamError(response.code)
-      const read = (url: URL, range: ByteRange) => this.clipRange(url, range, bounded)
+      const source = await this.clipTracks(input, bounded)
+      result.title = source.title
       const sample = async (kind: 'audio' | 'video', consume: (clip: { data: Buffer; skip: number }) => Promise<void>): Promise<ClipSample> => {
-        const track = selectBilibiliTrack(response.data, kind, selected.cid)
-        if (!track) return { status: 'unavailable', reason: 'bili-clip-stream-unavailable' }
         try {
-          await consume(await readBilibiliFragment(track, kind, input.start, input.seconds, read))
+          await consume(await source.fragment(kind))
           return { status: 'sampled' }
         } catch (error) {
           bounded.throwIfAborted()
@@ -269,6 +260,39 @@ export class BilibiliService {
       })
       bounded.throwIfAborted()
       return result
+    }, CLIP_DEADLINE_MS)
+  }
+
+  private async clipTracks(input: BilibiliClipInput, signal: AbortSignal) {
+    const video = await this.video(input.bvid, signal)
+    const selected = selectedPage(video, input.part)
+    if (input.start + input.seconds > selected.duration) throw new DeviceAuthError(422, 'bili-clip-outside-part')
+    const query = await this.signedQuery(video.bvid, selected.cid, signal, true)
+    if (!query) throw new DeviceAuthError(422, 'bili-clip-stream-unavailable')
+    const response = await this.api('/x/player/wbi/playurl', query, signal)
+    if (response.code !== 0) throw upstreamError(response.code)
+    return {
+      title: plainBilibiliText(video.title, 240),
+      fragment: (kind: 'audio' | 'video') => {
+        const track = selectBilibiliTrack(response.data, kind, selected.cid)
+        if (!track) throw new DeviceAuthError(422, 'bili-clip-stream-unavailable')
+        return readBilibiliFragment(track, kind, input.start, input.seconds, (url, range) => this.clipRange(url, range, signal))
+      },
+    }
+  }
+
+  async sampleOmniClip(input: BilibiliClipInput, signal: AbortSignal) {
+    const ffmpeg = this.media?.ffmpeg
+    if (!ffmpeg) throw new DeviceAuthError(503, 'bili-clip-decoder-unavailable')
+    return this.exclusive(signal, async bounded => {
+      this.companionReading = true
+      const source = await this.clipTracks(input, bounded)
+      const audio = input.mode === 'visual' ? undefined : await source.fragment('audio')
+      if (input.mode === 'audio' && audio) {
+        return { title: source.title, format: 'wav' as const, data: await decodeBilibiliAudio(ffmpeg, audio, input.seconds, bounded) }
+      }
+      const video = await source.fragment('video')
+      return { title: source.title, format: 'mp4' as const, data: await decodeBilibiliVideo(ffmpeg, video, input.seconds, bounded, audio) }
     }, CLIP_DEADLINE_MS)
   }
 

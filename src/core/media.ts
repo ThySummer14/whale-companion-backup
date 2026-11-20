@@ -21,6 +21,16 @@ export class MediaRepository {
     return rows.map(row => this.fromRow(row))
   }
 
+  singingPage(before?: { createdAt: string; id: string }): MediaAsset[] {
+    const filter = before ? 'AND (a.created_at<? OR (a.created_at=? AND a.id<?))' : ''
+    const rows = this.db.prepare(`SELECT a.* FROM media_asset a JOIN task t ON t.id=a.id
+      WHERE a.kind='song' AND a.source='singing' AND a.source_ref=a.id AND a.missing_at IS NULL AND a.deleted_at IS NULL
+        AND t.capability_id='media.singing' AND t.status='succeeded' ${filter}
+      ORDER BY a.created_at DESC, a.id DESC LIMIT 21`)
+      .all(...(before ? [before.createdAt, before.createdAt, before.id] : []))
+    return rows.map(row => this.fromRow(row))
+  }
+
   get(id: string): MediaAsset | undefined {
     const row = this.db.prepare('SELECT * FROM media_asset WHERE id=?').get(id)
     return row ? this.fromRow(row) : undefined

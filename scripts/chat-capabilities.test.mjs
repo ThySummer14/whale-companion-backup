@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { CHAT_CAPABILITY_TOOL, CHAT_DEFERRED_TOOLS, registerChatCapabilities } from '../src/host/chat-capabilities.ts'
+import { CHAT_CAPABILITY_TOOL, CHAT_DEFERRED_TOOLS, registerChatCapabilities, registerMobileChatEffort } from '../src/host/chat-capabilities.ts'
 import { HOUSE_DRAFT_TOOL } from '../src/host/minecraft-house-tool.ts'
 import { HOUSE_PROJECT_PLAN_TOOL, minecraftHouseProjectRequest } from '../src/host/minecraft-house-project-tool.ts'
+import { VOXEL_BLUEPRINT_TOOL } from '../src/host/minecraft-voxel-tool.ts'
 import { companionToolPolicy } from '../src/host/tool-policy.ts'
 
 const REMEMBER = 'companion_memory_remember'
@@ -11,23 +12,24 @@ const STOP = 'companion_avatar_stop'
 const message = (text = '普通聊天', source = { kind: 'user' }) => createUserMessage({ source, content: [{ type: 'text', text }] })
 const signal = new AbortController().signal
 
-function fixture(t, minecraft) {
+function fixture(t, minecraft, voxelBlueprints) {
   const events = new Map()
   const agents = new Map()
   const bindings = new Map()
   const effects = new Map()
   const invoked = []
-  const definitions = new Map(CHAT_DEFERRED_TOOLS.filter(name => name !== HOUSE_PROJECT_PLAN_TOOL).map(name => [name, { name, async execute(args, exec) {
+  const definitions = new Map(CHAT_DEFERRED_TOOLS.filter(name => ![HOUSE_PROJECT_PLAN_TOOL, VOXEL_BLUEPRINT_TOOL].includes(name)).map(name => [name, { name, async execute(args, exec) {
     invoked.push({ name, args, agent: exec.agent.id })
     return 'real-result'
   } }]))
   const ctx = {
+    get: key => key === 'attachments' ? { async *readFileStream() { yield Buffer.from('VOX ') } } : undefined,
     agents: { get: id => agents.get(id) },
     tools: { get: name => definitions.get(name) },
     logger: { warn: (...args) => assert.fail(String(args)) },
     on(name, handler) { events.set(name, handler); return () => events.delete(name) },
   }
-  const stop = registerChatCapabilities(ctx, { bindingBySession: id => bindings.get(id) }, minecraft)
+  const stop = registerChatCapabilities(ctx, { bindingBySession: id => bindings.get(id) }, minecraft, voxelBlueprints)
   t.after(stop)
   const agent = (id = 'phone', kind = 'chat', header = {}) => {
     const scope = { tools: new Map(), filters: new Set() }
@@ -63,13 +65,46 @@ test('routine chat starts with one small capability entry and hides only deferre
   const agent = h.agent()
   h.start(agent)
   assert.deepEqual([...h.scope(agent).tools.keys()], [CHAT_CAPABILITY_TOOL])
-  assert.deepEqual([...h.scope(agent).filters][0].deny, CHAT_DEFERRED_TOOLS.filter(name => name !== HOUSE_PROJECT_PLAN_TOOL))
+  assert.deepEqual([...h.scope(agent).filters][0].deny, CHAT_DEFERRED_TOOLS.filter(name => ![HOUSE_PROJECT_PLAN_TOOL, VOXEL_BLUEPRINT_TOOL].includes(name)))
   assert.ok(!CHAT_DEFERRED_TOOLS.includes('companion_memory_search'))
   assert.ok(!CHAT_DEFERRED_TOOLS.includes('working_directory'))
   assert.deepEqual(companionToolPolicy('chat.mobile', 'chat').onDemand, { entry: CHAT_CAPABILITY_TOOL, tools: CHAT_DEFERRED_TOOLS })
   for (const [context, kind] of [['game.minecraft','game'], ['world.bilibili','topic'], ['memory.curator','system']]) {
     assert.equal(companionToolPolicy(context, kind).onDemand, undefined)
   }
+})
+
+test('the voxel import reads the claimed owner attachment only from the live dispatch', async t => {
+  const prepare = t.mock.fn(async input => ({ id: 'saved', name: input.name, size: { x: 1, y: 1, z: 1 }, declared: 1, sha256: 'saved-hash' }))
+  const h = fixture(t, undefined, { prepare })
+  const phone = h.agent()
+  const owner = createUserMessage({ source: { kind: 'companion-mobile', form: 'relay' }, content: [
+    { type: 'text', text: '把这份作品转换成 Minecraft 蓝图，深度轴用正 Z。' },
+    { type: 'file', attachment: { attachmentId: 'current-file', name: '潮生.vox', bytes: 4 } },
+  ] })
+  h.start(phone)
+  h.claim(phone, owner)
+  h.admit(phone, owner)
+  const tool = h.tool(phone, VOXEL_BLUEPRINT_TOOL)
+  assert.ok(tool)
+  const exec = { agent: phone, signal, callId: 'import', rootCallId: 'import' }
+  await assert.rejects(tool.execute({}, exec), /current owner chat step/)
+  h.event(phone, 'tool/call', { turn: 1, step: 1, callId: 'import', name: VOXEL_BLUEPRINT_TOOL })
+  assert.match(await tool.execute({}, exec), /"status":"prepared"/)
+  assert.equal(prepare.mock.callCount(), 1)
+  const input = prepare.mock.calls[0].arguments[0]
+  assert.deepEqual(input.bytes, Buffer.from('VOX '))
+  assert.equal(input.source.attachmentId, 'current-file')
+  assert.equal(input.source.messageId, owner.id)
+  assert.equal(input.depthAsZ, true)
+  await assert.rejects(tool.execute({}, exec), /current owner chat step/)
+  h.event(phone, 'turn/end', { turn: 1 })
+  h.start(phone, 2)
+  const textOnly = message('沿用旧附件，把体素转换成 Minecraft 蓝图。')
+  h.claim(phone, textOnly, 2)
+  h.admit(phone, textOnly, 2)
+  assert.equal(h.tool(phone, VOXEL_BLUEPRINT_TOOL), undefined)
+  assert.match(await h.open(phone, 'voxel_blueprint'), /same message/)
 })
 
 test('admitted owner chat opens just the selected tool, keeps its behavior, and does not leak into parallel or later turns', async t => {
@@ -119,6 +154,26 @@ test('the house uses the original explicit-request admission rule and is availab
   h.admit(a, ordinary, 2)
   assert.match(await h.open(a, 'house_blueprint'), /explicit Minecraft house request/u)
   assert.ok(!h.tool(a, HOUSE_DRAFT_TOOL))
+})
+
+test('asking about a posted dynamic exposes only the real read tool for the current owner chat', async t => {
+  const h = fixture(t)
+  const a = h.agent('mobile')
+  const read = 'companion_feed_read'
+  const owner = message('你能看到我刚发的动态吗？', { kind: 'companion-mobile', form: 'relay' })
+  h.start(a)
+  h.claim(a, owner)
+  const tool = h.tool(a, read)
+  assert.ok(tool)
+  await assert.rejects(tool.execute({}, { agent: a, signal }), /current owner/)
+  h.admit(a, owner)
+  assert.equal(await tool.execute({ limit: 1 }, { agent: a, signal }), 'real-result')
+  assert.equal(h.tool(a, 'companion_post_create'), undefined)
+  const policy = companionToolPolicy('chat.mobile', 'chat')
+  assert.ok(policy.allowed.some(({ name }) => name === read))
+  assert.ok(policy.denied.includes('companion_post_create'))
+  h.event(a, 'turn/end', { turn: 1 })
+  await assert.rejects(tool.execute({}, { agent: a, signal }), /current owner/)
 })
 
 test('an explicit Minecraft house request can include dimensions before the house noun', t => {
@@ -345,4 +400,24 @@ test('missing and ambiguous project lookups cannot produce a recommendation', as
     await assert.rejects(p.execute('submit', build), /Inspect the project/)
     assert.deepEqual(p.calls.map(call => call.type), ['observe'])
   }
+})
+
+test('only the paired mobile DeepSeek scene chooses a provider-advertised low effort', async () => {
+  const agent = { id: 'chat-root' }
+  let contextId = 'chat.mobile'
+  let levels = [{ id: 'low' }]
+  let hook
+  const ctx = {
+    on: (_name, listener) => { hook = listener; return () => {} },
+    agents: { get: () => agent },
+    llm: { resolveModelInfo: async () => ({ reasoning: { efforts: levels } }) },
+  }
+  registerMobileChatEffort(ctx, { bindingBySession: () => ({ kind: 'chat', contextId }) })
+  const config = { provider: 'deepseek', model: 'deepseek-v4.1-flash', reasoningEffort: 'high' }
+  assert.equal((await hook({ agent, signal }, async () => config)).reasoningEffort, 'low')
+  levels = [{ id: 'high' }]
+  assert.equal(await hook({ agent, signal }, async () => config), config)
+  levels = [{ id: 'low' }]
+  contextId = 'game.minecraft'
+  assert.equal(await hook({ agent, signal }, async () => config), config)
 })

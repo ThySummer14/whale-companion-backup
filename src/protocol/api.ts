@@ -154,6 +154,7 @@ export interface MinecraftSurveyWindowInput {
   allowMinecraftGather?: true
   allowMinecraftProjectGather?: true
   houseProjectId?: string
+  allowHouseProjectFull?: true
   allowHouseProjectSupply?: true
 }
 

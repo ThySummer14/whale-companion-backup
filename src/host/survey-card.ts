@@ -1,4 +1,4 @@
-import { crc32, deflateSync } from 'node:zlib'
+import { encodePng } from '../core/png.ts'
 import { surveyDiagram, type SurveyPoint } from '../core/survey-diagram.ts'
 import type { CommunityCampReceipt } from '../protocol/api.ts'
 
@@ -86,16 +86,6 @@ class Raster {
   }
 }
 
-function pngChunk(type: string, data: Buffer): Buffer {
-  const name = Buffer.from(type, 'ascii')
-  const chunk = Buffer.alloc(data.length + 12)
-  chunk.writeUInt32BE(data.length)
-  name.copy(chunk, 4)
-  data.copy(chunk, 8)
-  chunk.writeUInt32BE(crc32(data, crc32(name)), chunk.length - 4)
-  return chunk
-}
-
 export function renderSurveyCard(receipt: Extract<CommunityCampReceipt, { kind: 'survey' }>): Buffer {
   const diagram = surveyDiagram(receipt)
   if (!diagram) throw new TypeError('Invalid survey receipt')
@@ -144,14 +134,5 @@ export function renderSurveyCard(receipt: Extract<CommunityCampReceipt, { kind: 
   card.segment([183, 195], [203, 195], false)
   card.label(211, 192, 'PLANNED', 'muted')
 
-  const header = Buffer.alloc(13)
-  header.writeUInt32BE(WIDTH)
-  header.writeUInt32BE(HEIGHT, 4)
-  header[8] = 8
-  header[9] = 3 // Indexed color.
-  return Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    pngChunk('IHDR', header), pngChunk('PLTE', palette),
-    pngChunk('IDAT', deflateSync(card.scanlines)), pngChunk('IEND', Buffer.alloc(0)),
-  ])
+  return encodePng(WIDTH, HEIGHT, card.scanlines, palette)
 }

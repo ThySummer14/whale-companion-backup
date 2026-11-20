@@ -32,6 +32,8 @@ import { deviceFeedPostId } from './device-feed.ts'
 import type { DeviceFeedPublishInput } from './api-schemas.ts'
 import { companionToolPolicy } from './tool-policy.ts'
 import { MinecraftService, type MinecraftTransportOptions } from './minecraft.ts'
+import { VoxelBlueprintService } from './minecraft-voxel-blueprints.ts'
+import { VoxelConstructionService } from './minecraft-blueprint-build.ts'
 import { MinecraftVoiceRelay } from './minecraft-voice.ts'
 import { MAX_BILIBILI_CLIP_SECONDS } from '../protocol/bilibili.ts'
 import { BilibiliService } from './bilibili.ts'
@@ -83,6 +85,8 @@ export class CompanionRuntime {
   readonly presenter: PresenterService
   readonly realtimeVoice: RealtimeVoiceService
   readonly minecraft: MinecraftService
+  readonly voxelBlueprints: VoxelBlueprintService
+  readonly voxelConstruction: VoxelConstructionService
   readonly bilibili: BilibiliService
   readonly qwenWatch: QwenWatchService
   readonly singing: SingingService
@@ -120,8 +124,9 @@ export class CompanionRuntime {
     this.tts = new TtsService(store, this.sessions, ttsOptions)
     this.media = new MediaService(store, mediaRoot)
     this.deviceMedia = new DeviceMediaService(store, mediaRoot)
+    this.voxelBlueprints = new VoxelBlueprintService(store, mediaRoot)
     this.bilibili = new BilibiliService(store, fetch, { ffmpeg: bilibiliFfmpeg, asr })
-    this.qwenWatch = new QwenWatchService(this.bilibili)
+    this.qwenWatch = new QwenWatchService(this.bilibili, store)
     this.singing = new SingingService(store, mediaRoot, singingProvider, coverProvider, separatorProvider, scoreProvider)
     const packageRoot = dirname(createRequire(import.meta.url).resolve('dsh-companion-bot/package.json'))
     this.avatar = new AvatarService(store, avatarRoot, join(packageRoot, 'lib', 'avatar'))
@@ -155,6 +160,7 @@ export class CompanionRuntime {
         })
       }),
     )
+    this.voxelConstruction = new VoxelConstructionService(store, this.voxelBlueprints, this.minecraft)
     this.autonomy = new AutonomyService(
       store, this.sessions, this.avatar,
       {
@@ -193,7 +199,9 @@ export class CompanionRuntime {
         surveyCamp: (zoneId, direction, signal, steps, visitId) => this.minecraft.surveyCamp(zoneId, direction, signal, steps, visitId),
         surveyTrail: (zoneId, trail, signal, visitId) => this.minecraft.surveyTrail(zoneId, trail, signal, visitId),
         dailyHouseProjectReady: now => this.minecraft.worldHealth(now) === 'ready',
-        inspectDailyHouseProject: (projectId, zoneId, signal, allowSupply) => this.minecraft.inspectDailyHouseProject(projectId, zoneId, signal, allowSupply),
+        inspectDailyHouseProject: (projectId, zoneId, signal, allowSupply, fullProject) => this.minecraft.inspectDailyHouseProject(projectId, zoneId, signal, allowSupply, fullProject),
+        buildDailyHouseProject: (projectId, zoneId, offer, signal, assertPermit, lease) =>
+          this.minecraft.buildDailyHouseProject(projectId, zoneId, offer, signal, assertPermit, lease),
         buildDailyHouseProjectSection: (projectId, zoneId, offer, signal, assertPermit, lease) =>
           this.minecraft.buildDailyHouseProjectSection(projectId, zoneId, offer, signal, assertPermit, lease),
         supplyDailyHouseProjectSection: (projectId, zoneId, offer, signal, assertPermit, lease) =>
@@ -219,6 +227,7 @@ export class CompanionRuntime {
   }
 
   start(): void {
+    this.voxelConstruction.reconcile()
     for (const hub of this.events) hub.start()
     this.ctx.on('session/event', (session, event) => {
       this.idleCompaction.observe(session.id, event)
@@ -699,7 +708,7 @@ export class CompanionRuntime {
       presence, bindings, runningSessions, minecraft,
       speaking: !minecraft && (device.speaking || (options.playback?.speaking ?? this.realtimeVoice.homeSpeaking(timestamp))),
       singing: !minecraft && (device.singing || (options.playback?.singing ?? this.realtimeVoice.homeSinging(timestamp))),
-      browsing: this.bilibili.homeActive() || this.autonomy.homeClipActive(), quiet: this.autonomy.isQuietTime(now),
+      browsing: this.bilibili.homeActive() || this.qwenWatch.watching || this.autonomy.homeClipActive(), quiet: this.autonomy.isQuietTime(now),
       reflectionAt: options.reflectionAt,
     }
   }

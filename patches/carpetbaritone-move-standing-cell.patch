@@ -1,0 +1,45 @@
+diff --git a/src/main/java/baritone/server/BasicGoalCommandHandler.java b/src/main/java/baritone/server/BasicGoalCommandHandler.java
+--- a/src/main/java/baritone/server/BasicGoalCommandHandler.java
++++ b/src/main/java/baritone/server/BasicGoalCommandHandler.java
+@@ -399,8 +399,14 @@
+             int x = coordinate(args[1], "x");
+             int y = coordinate(args[2], "y");
+             int z = coordinate(args[3], "z");
+-            goal = new GoalBlock(x, y, z);
++            BlockPos target = new BlockPos(x, y, z);
+             destination = x + " " + y + " " + z;
++            String unavailable = unavailableStandingCell(fakePlayer, target);
++            if (unavailable != null) {
++                reply(fakePlayer, sender, "落脚点不可用 [" + unavailable + "] " + destination);
++                return;
++            }
++            goal = new GoalBlock(target);
+         } else if (args.length == 3) {
+             int x = coordinate(args[1], "x");
+             int z = coordinate(args[2], "z");
+@@ -411,6 +417,25 @@
+         }
+ 
+         startGoal(sender, fakePlayer, baritone, goal, destination);
++    }
++
++    private static String unavailableStandingCell(ServerPlayer player, BlockPos target) {
++        var world = player.serverLevel();
++        var settings = Baritone.settings();
++        if (settings.allowBreak.value || settings.allowPlace.value || !world.hasChunkAt(target)) {
++            return null;
++        }
++        for (BlockPos position : List.of(target, target.above())) {
++            var state = world.getBlockState(position);
++            if (state.isCollisionShapeFullBlock(world, position)
++                    && !settings.allowBreakAnyway.value.contains(state.getBlock())) {
++                return "move-target-blocked";
++            }
++        }
++        if (world.getBlockState(target).isAir() && world.getBlockState(target.below()).isAir()) {
++            return "move-target-unsupported";
++        }
++        return null;
+     }
+ 
+     private static void startMine(

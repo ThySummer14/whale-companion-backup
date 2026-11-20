@@ -2,11 +2,13 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import test from 'node:test'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY, MinecraftHouseProjectInput, MinecraftHouseProjectVerification,
   MinecraftHouseProjectVerifyRequest, minecraftHouseProjectRequests } from '../src/core/minecraft-house-project.ts'
 import { CompanionStore } from '../src/core/store.ts'
 import { MinecraftService } from '../src/host/minecraft.ts'
 import { DeviceAuthError } from '../src/host/devices.ts'
+import { registerMemoryRecall } from '../src/host/recall.ts'
 import { DAILY_AUTONOMY_CONTEXT } from '../src/core/model.ts'
 
 const layout = { width: 5, height: 4, depth: 5, blocks: 'o'.repeat(60) + '.'.repeat(40) }
@@ -19,7 +21,7 @@ const planRequest = '请帮我选 Minecraft 建筑工程「两间测试房」的
 test('immutable sections cover all planned air and solids once and derive narrower cubes', () => {
   const input = MinecraftHouseProjectInput.parse(blueprint(zone.id))
   const sections = minecraftHouseProjectRequests(input, zone)
-  assert.deepEqual(sections.map(({ zone: child }) => [child.x, child.y, child.z, child.radius]), [[-12, 80, 30, 6], [-7, 80, 30, 5]])
+  assert.deepEqual(sections.map(({ zone: child }) => [child.x, child.y, child.z, child.radius]), [[-12, 80, 30, 3], [-7, 80, 30, 3]])
   assert.ok(sections.every(section => section.zone.id === zone.id && section.zone.dimension === zone.dimension))
   assert.ok(MinecraftHouseProjectVerifyRequest.safeParse({ sections }).success)
   assert.ok(MinecraftHouseProjectVerifyRequest.safeParse({ sections: [...sections].reverse() }).success)
@@ -27,7 +29,7 @@ test('immutable sections cover all planned air and solids once and derive narrow
     zone: { ...sections[1].zone, dimension: 'minecraft:the_nether' } }] }).success, false)
   assert.equal(MinecraftHouseProjectVerifyRequest.safeParse({ sections: [sections[0], { ...sections[1],
     zone: { ...sections[1].zone, radius: 2 } }] }).success, false)
-  assert.equal(minecraftHouseProjectRequests(input, { ...zone, radius: 5 }), undefined)
+  assert.equal(minecraftHouseProjectRequests(input, { ...zone, radius: 3 }), undefined)
   for (const x of [2, 4]) {
     const broken = structuredClone(input)
     broken.sections[1].offset.x = x
@@ -57,7 +59,21 @@ function fixture(t) {
   const state = {
     calls: [], online: true, recovery: false,
     preview: () => ({ ready: true, checked: 100 }),
-    receipt: () => ({ built: true, zoneId: area.id, checked: 100, placed: 60, consumed: { oak_planks: 60 } }),
+    receipt: () => ({
+      built: true,
+      zoneId: area.id,
+      checked: 100,
+      placed: 60,
+      consumed: { oak_planks: 60 },
+    }),
+    creativeReceipt: input => ({
+      built: true,
+      zoneId: area.id,
+      checked: input.layout.blocks.length,
+      placed: Math.round(input.layout.blocks.replaceAll('.', '').length * 0.6),
+      consumed: {},
+      creative: true,
+    }),
     recoveryPreview: () => ({ ready: true, checked: 100 }),
     recoveryReceipt: () => ({ built: true, zoneId: area.id, checked: 100, placed: 2, consumed: { oak_planks: 2 } }),
     verification: () => ({ matched: true, checked: 200, unmatchedSections: [] }),
@@ -72,9 +88,13 @@ function fixture(t) {
         } }
         case '/house/preview': return state.preview(input)
         case '/house/build': return state.receipt(input)
+        case '/house/creative-build': return state.creativeReceipt(input)
         case '/house/recovery-preview': return state.recoveryPreview(input)
         case '/house/recover': return state.recoveryReceipt(input)
         case '/house/project-verify': return state.verification(input)
+        case '/house/support': return { placed: 4, checked: 100 }
+        case '/gamemode': return { mode: input.mode }
+        case '/teleport': return { teleported: true, position: input }
         case '/stop': return {}
         default: throw new Error('Unexpected request: ' + path)
       }
@@ -144,8 +164,97 @@ test('project progress, approval scope and world receipt survive cold reopen', a
   state.verification = () => ({ matched: false, checked: 200, unmatchedSections: [0] })
   const drift = await crashed.service.verifyHouseProject(id)
   assert.deepEqual(drift.verification.unmatchedSections, [0])
-  assert.ok(drift.sections.every(section => section.status === 'built' && section.receipt))
+  assert.deepEqual(drift.sections.map(section => section.status), ['interrupted', 'built'])
+  assert.equal(drift.sections[0].reason, 'house-project-verification-mismatch')
+  assert.equal(drift.sections[0].receipt, undefined)
+  assert.ok(drift.sections[1].receipt)
+  assert.ok(crashed.db.activities().some(activity => activity.kind === 'world.house-project-section' && activity.data.index === 0 && activity.data.checked === 100))
   assert.equal(openAgain().db.minecraftHouseProjects.get(id).verification.matched, false)
+})
+
+test('the host does not abandon whole-project verification before the worker deadline', async t => {
+  const { service } = fixture(t)
+  service.ready = true
+  service.token = 'fixture'
+  let timeout = 0
+  t.mock.method(AbortSignal, 'timeout', milliseconds => { timeout = milliseconds; return new AbortController().signal })
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ ok: true }))
+  assert.deepEqual(await Object.getPrototypeOf(service).request.call(service, '/house/project-verify', 'POST', {}), { ok: true })
+  assert.ok(timeout > 120_000)
+})
+
+test('project construction returns a creative builder to survival after each section', async t => {
+  const { id, state, service } = fixture(t)
+  service.markCreativeForBuild()
+  const preview = await service.previewHouseProjectSection(id, 0, signal)
+  await service.buildHouseProjectSection(id, 0, preview.previewId)
+  assert.deepEqual(state.calls.filter(call => call.path === '/gamemode').map(call => call.input), [{ mode: 'survival' }])
+  assert.equal(service.creativeForBuild, false)
+})
+
+test('one authorized autonomous run generates every section, verifies it and restores survival', async t => {
+  const { id, state, service, store, area } = fixture(t)
+  const creativeReceipt = state.creativeReceipt
+  let checkedOwnActivity = false
+  state.creativeReceipt = input => {
+    if (!checkedOwnActivity) {
+      const parent = store.tasks().find(task => task.capabilityId === 'minecraft.house-project.autonomous' && task.status === 'running')
+      service.ready = true
+      service.homeActiveAt = Date.now()
+      service.homeActiveKind = 'house-creative-build'
+      assert.equal(service.homeActive(Date.now(), false, parent.id), false)
+      assert.equal(service.homeActive(Date.now()), true)
+      checkedOwnActivity = true
+    }
+    return creativeReceipt(input)
+  }
+  const result = await service.autoBuildHouseProject(id)
+  assert.equal(result.verification.matched, true)
+  assert.deepEqual(result.sections.map(section => section.status), ['built', 'built'])
+  assert.equal(state.calls.filter(call => call.path === '/house/creative-build').length, 8)
+  assert.equal(state.calls.some(call => call.path === '/house/preview'), false)
+  assert.ok(state.calls.some(call => call.path === '/gamemode' && call.input.mode === 'creative'))
+  assert.equal(state.calls.filter(call => call.path === '/teleport').length, 1)
+  assert.deepEqual(state.calls.find(call => call.path === '/teleport').input, { x: area.x, y: area.y, z: area.z })
+  assert.ok(state.calls.findIndex(call => call.path === '/teleport') < state.calls.findIndex(call => call.path === '/house/creative-build'))
+  assert.deepEqual(state.calls.filter(call => call.path === '/house/creative-build').map(call => call.input.zone.y),
+    [area.y, area.y + 1, area.y + 2, area.y + 3, area.y, area.y + 1, area.y + 2, area.y + 3])
+  assert.deepEqual(state.calls.filter(call => call.path === '/gamemode').map(call => call.input.mode), ['creative', 'survival'])
+  assert.equal(store.tasks().find(task => task.capabilityId === 'minecraft.house-project.autonomous').status, 'succeeded')
+})
+
+test('a failed world recheck revokes stale built status and rebuilds each layer at its actual height', async t => {
+  const { input, state, service } = fixture(t)
+  const vertical = { ...input, sections: input.sections.map((section, index) => ({ ...section, offset: { x: 0, y: index * 4, z: 0 } })) }
+  const { id } = service.createHouseProject(vertical)
+  const preview = await service.previewHouseProjectSection(id, 0, signal)
+  await service.buildHouseProjectSection(id, 0, preview.previewId)
+  let firstVerification = true
+  state.verification = () => {
+    const unmatchedSections = firstVerification ? [0] : []
+    firstVerification = false
+    return { matched: unmatchedSections.length === 0, checked: 200, unmatchedSections }
+  }
+  const result = await service.autoBuildHouseProject(id)
+  assert.equal(result.verification.matched, true)
+  assert.deepEqual(result.sections.map(section => section.status), ['built', 'built'])
+  assert.deepEqual(state.calls.filter(call => call.path === '/house/creative-build').map(call => call.input.zone.y),
+    [80, 81, 82, 83, 84, 85, 86, 87])
+  assert.equal(state.calls.filter(call => call.path === '/house/project-verify').length, 2)
+})
+
+test('an autonomous run does not issue any building write until reaching the authorized project', async t => {
+  const { id, state, service } = fixture(t)
+  service.request = async (path, _method, input) => {
+    state.calls.push({ path, input })
+    if (path === '/teleport') throw new Error('teleport-unconfirmed')
+    if (path === '/gamemode') return { mode: input.mode }
+    if (path === '') return { online: true, auth: { mode: 'cbi' }, capabilities: { houseBuilding: true, houseProjects: true } }
+    throw new Error('Unexpected request: ' + path)
+  }
+  await assert.rejects(service.autoBuildHouseProject(id), /teleport-unconfirmed/u)
+  assert.equal(state.calls.some(call => call.path === '/house/creative-build'), false)
+  assert.equal(state.calls.at(-1).input.mode, 'survival')
 })
 
 test('shortages, malformed worker receipts and revoked authorization never imply completion', async t => {
@@ -313,6 +422,44 @@ function dailyTask(store) {
   return store.transitionTask(job.id, 'running')
 }
 
+test('daily full building uses one parent task for every remaining section and the whole verification', async t => {
+  const { id, state, service, store, area } = fixture(t)
+  const parent = dailyTask(store)
+  const [offer] = await service.inspectDailyHouseProject(id, area.id, signal, undefined, true)
+  assert.deepEqual(offer, { section: 0, name: '1', fullProject: true })
+  let started
+  const lease = { dailyTaskId: parent.id, onStarted: task => { started = task } }
+  const { task, verification } = await service.buildDailyHouseProject(id, area.id, offer, signal, () => {}, lease)
+  assert.equal(task.id, started.id)
+  assert.equal(task.capabilityId, 'minecraft.house-project.autonomous')
+  assert.equal(task.externalId, DAILY_HOUSE_PROJECT_TASK_PREFIX + parent.id)
+  assert.equal(task.status, 'succeeded')
+  assert.equal(verification.matched, true)
+  assert.equal(verification.checked, 200)
+  assert.deepEqual(store.minecraftHouseProjects.get(id).sections.map(section => section.status), ['built', 'built'])
+  assert.equal(state.calls.filter(call => call.path === '/house/creative-build').length, 8)
+  assert.equal(state.calls.some(call => call.path === '/house/preview'), false)
+  const activity = store.activityByTask(task.id, 'world.house-project-verification', 'game.minecraft')
+  assert.equal(activity.data.dailyTaskId, parent.id)
+  assert.equal(activity.data.checked, 200)
+  const projectName = store.minecraftHouseProjects.get(id).name
+  assert.equal(activity.data.projectName, projectName)
+  const memory = store.memory.list().find(item => item.content.includes('整体验收核对 200'))
+  assert.ok(memory?.content.includes(projectName))
+  assert.equal(memory.scope, 'shared')
+  store.bindContext({ contextId: 'chat.mobile', sessionId: 'phone-session', kind: 'chat', label: '手机' })
+  let recall
+  registerMemoryRecall({ on(_name, callback) { recall = callback } }, store)
+  const input = createUserMessage({ source: { kind: 'companion-mobile', form: 'relay' },
+    content: [{ type: 'text', text: `我们的${projectName}验收了吗？` }] })
+  const result = await recall({ agent: { id: 'phone-session' }, messages: [input], turn: 1, step: 1, signal },
+    async () => ({ kind: 'enter', messages: [input] }))
+  const context = result.messages.slice(1).flatMap(message => message.content.map(part => part.text)).join('\n')
+  assert.ok(context.includes(projectName) && context.includes('整体验收核对 200'))
+  assert.equal(state.calls.filter(call => call.path === '/gamemode').at(-1).input.mode, 'survival')
+  await assert.rejects(service.buildDailyHouseProject(id, area.id, offer, signal, () => {}, lease), /project-plan-stale/u)
+})
+
 test('daily building accepts only its original live offer and journals one actual section for the parent', async t => {
   const { id, state, service, store, area, openAgain } = fixture(t)
   const old = await service.previewHouseProjectSection(id, 0, signal)
@@ -385,4 +532,19 @@ test('daily admission checks the active parent and a cancelled execution cannot 
   assert.equal(store.minecraftHouseProjects.sectionReceiptByTask(taskId), undefined)
   assert.equal(store.activityByTask(taskId, 'world.house-project-section', 'game.minecraft'), undefined)
   assert.deepEqual(store.memory.list(), [])
+})
+
+
+test('renovation metadata and more than eight sections survive a cold reopen', async t => {
+  const { store, openAgain } = fixture(t)
+  const sections = Array.from({ length: 10 }, (_, index) => ({
+    name: `区 ${index}`, offset: { x: index * 4 - 20, y: 0, z: 0 },
+    layout: { width: 4, height: 4, depth: 4, blocks: 'o'.repeat(64) },
+  }))
+  const project = store.minecraftHouseProjects.create({ zoneId: store.buildZones()[0].id, name: '完整茶肆改建', renovate: true, sections })
+  assert.equal(project.sections.length, 10)
+  const reopened = openAgain().db
+  assert.equal(reopened.minecraftHouseProjects.get(project.id).renovate, true)
+  assert.equal(reopened.minecraftHouseProjects.get(project.id).sections.length, 10)
+  assert.equal(Number(reopened.db.prepare('PRAGMA user_version').get().user_version), 49)
 })

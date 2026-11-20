@@ -105,11 +105,11 @@ test('requires a paired device and reports whether local ASR is configured', asy
   assert.equal((await h.send(wav())).status, 404)
 })
 
-test('forwards valid 16 kHz and recorder fallback WAV bytes with a fixed upstream request', async t => {
+test('forwards supported WAV sample rates with a fixed upstream request', async t => {
   const h = await fixture(t, res => json(res, { text: '  测试转录。  ', ignored: 'private upstream data' }))
   assert.deepEqual(await (await h.send()).json(), { available: true, voiceReplyReady: true })
   assert.equal(h.calls.length, 0)
-  for (const rate of [16000, 44100, 48000]) {
+  for (const rate of [8000, 16000, 44100, 48000]) {
     const audio = wav(rate, rate * 15)
     const response = await h.send(audio, { type: 'Audio/Wav; name=recording.wav' })
     assert.equal(response.status, 200)
@@ -137,7 +137,7 @@ test('rejects silence, unsupported media and malformed or oversized RIFF before 
   oddFrame.writeUInt32LE(oddFrame.length - 44, 40)
   const falseSignature = wav()
   falseSignature[0] = 0xd2
-  for (const invalid of [Buffer.from('not wav'), wav(8000), stereo, invalidDataSize, oddFrame, wav().subarray(0, -1), falseSignature]) {
+  for (const invalid of [Buffer.from('not wav'), wav(11025), stereo, invalidDataSize, oddFrame, wav().subarray(0, -1), falseSignature]) {
     assert.equal((await h.send(invalid)).status, 400)
   }
   assert.equal((await h.send(wav(), { type: 'application/json' })).status, 415)

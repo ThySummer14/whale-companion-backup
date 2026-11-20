@@ -1,6 +1,7 @@
 import { MinecraftWardrobeConfigSchema } from '../../src/protocol/minecraft-wardrobe.ts'
 
 export const YSM_MODEL_NBT = 'ysm.model_id'
+export const BPM_MODEL_NBT = 'cardinal_components."better_player_model:model_info".ModelInfo'
 
 export function configuredWardrobe(raw: string | undefined) {
   if (!raw || Buffer.byteLength(raw) > 16_384) return []
@@ -32,16 +33,20 @@ export function ysmWardrobeReceipt(log: string, player: string, model: string): 
       message === `[YSM] 无法将玩家 '${player}' 的模型设置为 '${model}'，缺少权限` ||
       message === `[YSM] '${model}' is not exist` || message === `[YSM] '${model}' 不存在`) return 'refused'
     if (message === 'No player was found' || message === 'No entity was found') return 'offline'
-    if (message === 'message.yes_steve_model.model.set.success') return 'raw-accepted'
+    if (message === 'message.yes_steve_model.model.set.success' || message === 'message.better_player_model.model.set.success') return 'raw-accepted'
     if (message === 'message.yes_steve_model.model.set.need_auth' || message === 'commands.yes_steve_model.export.not_exist') return 'unconfirmed'
   }
 }
 
-export function ysmWardrobeStateLine(log: string, player: string): { kind: 'data'; snbt: string } | { kind: 'absent' | 'offline' } | undefined {
+export function ysmWardrobeStateLine(log: string, player: string, path = YSM_MODEL_NBT): { kind: 'data'; snbt: string } | { kind: 'absent' | 'offline' } | undefined {
   const prefix = `${player} has the following entity data: `
+  const missing = 'Found no elements matching '
   for (const message of serverInfo(log)) {
     if (message.startsWith(prefix)) return { kind: 'data', snbt: message.slice(prefix.length) }
-    if (message === `Found no elements matching ${YSM_MODEL_NBT}`) return { kind: 'absent' }
+    if (message.startsWith(missing)) {
+      const absent = message.slice(missing.length)
+      if (absent === path || path.startsWith(`${absent}.`)) return { kind: 'absent' }
+    }
     if (message === 'No entity was found' || message === 'No player was found') return { kind: 'offline' }
   }
 }

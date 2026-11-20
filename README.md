@@ -83,39 +83,39 @@ Mac 本地预览可双击根目录的 `预览手机App.command`，或运行 `pnp
 
 安卓 DSH Go 版源码位于 [apps/dsh-go](apps/dsh-go/)，基于上游 `v1.0.13`，以独立的 `companion` flavor 和 `lib/whale_main.dart` 启动。配对时在 Mac mini 工作台的“设备”页填写 Tailscale HTTPS 地址，再将一次性链接粘贴到 App。图片动态需要 Companion `0.15.0+`，纯图片动态与回复需要 `0.15.1+`。
 
-DSH Go 安卓版 `0.2.0` 在已完成的助手消息下提供“听语音”。点按后复用 Mac mini 的按需 TTS，播放时可以暂停、继续或在结束后重播。APK 与 `0.1.0` 使用同一签名，可覆盖安装。 [Android ARM64 APK](whale-companion-go-0.2.0-arm64.apk)
+DSH Go 安卓版 `0.2.0` 在已完成的助手消息下提供“听语音”。点按后复用 Mac mini 的按需 TTS，播放时可以暂停、继续或在结束后重播。APK 与 `0.1.0` 使用同一签名，可覆盖安装。
 
-安卓 `0.3.0` 新增状态栏和状态页，可查看角色连接、语音、Minecraft、虚拟形象以及已记录的 Token。使用正式 Companion `0.15.1` 的现有接口。 [Android 0.3.0 ARM64 APK](whale-companion-go-0.3.0-arm64.apk)
+安卓 `0.3.0` 新增状态栏和状态页，可查看角色连接、语音、Minecraft、虚拟形象以及已记录的 Token。使用正式 Companion `0.15.1` 的现有接口。
 
-安卓 `0.4.0` 新增活动页，通过已配对主机的记录查看动态回应、Minecraft 动作和舞台回执。动态活动可打开对应原帖或回复。 [Android 0.4.0 ARM64 APK](whale-companion-go-0.4.0-arm64.apk)
+安卓 `0.4.0` 新增活动页，通过已配对主机的记录查看动态回应、Minecraft 动作和舞台回执。动态活动可打开对应原帖或回复。
 
-安卓 `0.5.0` 的“听语音”支持边收边播。连接已配置 PCM Provider 的 Companion `0.18.0` 时优先使用实时流，旧主机或起播前的可回退错误沿用 WAV。播放、暂停、继续与切页停止由原生音频状态确认。 [Android 0.5.0 ARM64 APK](whale-companion-go-0.5.0-arm64.apk)
+安卓 `0.5.0` 的“听语音”支持边收边播。连接已配置 PCM Provider 的 Companion `0.18.0` 时优先使用实时流，旧主机或起播前的可回退错误沿用 WAV。播放、暂停、继续与切页停止由原生音频状态确认。
 
-安卓 `0.6.0` 加入点按录音。连接已配置本地转写的 Companion `0.19.0` 后，录音最多 15 秒，停止时由配对主机转写。结果追加到输入草稿，编辑确认后发送，回复可用“听语音”播放。 [Android 0.6.0 ARM64 APK](whale-companion-go-0.6.0-arm64.apk)
+安卓 `0.6.0` 加入点按录音。连接已配置本地转写的 Companion `0.19.0` 后，录音最多 15 秒，停止时由配对主机转写。结果追加到输入草稿，编辑确认后发送，回复可用“听语音”播放。
 
-安卓 `0.7.0` 在检测到说话后的停顿时自动结束录音并转写。搭配 Companion `0.20.0`，可在确认语音草稿时选择朗读这次回复，等待中和播放中均可停止。 [Android 0.7.0 ARM64 APK](whale-companion-go-0.7.0-arm64.apk)
+安卓 `0.7.0` 在检测到说话后的停顿时自动结束录音并转写。搭配 Companion `0.20.0`，可在确认语音草稿时选择朗读这次回复，等待中和播放中均可停止。
 
-安卓 `0.8.0` 搭配配置了流式 TTS 的 Companion `0.21.0`，在勾选朗读的回合中提前准备首句音频。回复完成、写入持久层且首句一致时复用音频。状态页可查看最近一次 PCM 到达和原生起播耗时。 [Android 0.8.0 ARM64 APK](whale-companion-go-0.8.0-arm64.apk)
+安卓 `0.8.0` 搭配配置了流式 TTS 的 Companion `0.21.0`，在勾选朗读的回合中提前准备首句音频。回复完成、写入持久层且首句一致时复用音频。状态页可查看最近一次 PCM 到达和原生起播耗时。
 
-安卓 `0.9.0` 与 Companion `0.22.0` 可以接着播放已缓冲但尚未合成完的首句。状态页把语音转写、回复就绪和原生起播分开显示，并标明最近一次 PCM 的来源。 [Android 0.9.0 ARM64 APK](whale-companion-go-0.9.0-arm64.apk)
+安卓 `0.9.0` 与 Companion `0.22.0` 可以接着播放已缓冲但尚未合成完的首句。状态页把语音转写、回复就绪和原生起播分开显示，并标明最近一次 PCM 的来源。
 
-安卓 `0.10.0` 在聊天页加入连续语音。确认开启后，停顿会自动转写并发送，朗读结束后重新开麦。播放中可点“打断并说话”，原有麦克风按钮仍可生成待确认草稿。连续语音需要宿主同时提供转写和回复就绪通知。 [Android 0.10.0 ARM64 APK](whale-companion-go-0.10.0-arm64.apk)
+安卓 `0.10.0` 在聊天页加入连续语音。确认开启后，停顿会自动转写并发送，朗读结束后重新开麦。播放中可点“打断并说话”，原有麦克风按钮仍可生成待确认草稿。连续语音需要宿主同时提供转写和回复就绪通知。
 
-安卓 `0.11.0` 在底栏加入「小家」。搭配 Companion `0.27.0` 可看到房间内的当前位置和近期活动。连接旧主机时仍可聊天和查看动态，小家会提示该主机暂未提供房间状态。 [Android 0.11.0 ARM64 APK](whale-companion-go-0.11.0-arm64.apk)
+安卓 `0.11.0` 在底栏加入「小家」。搭配 Companion `0.27.0` 可看到房间内的当前位置和近期活动。连接旧主机时仍可聊天和查看动态，小家会提示该主机暂未提供房间状态。
 
-安卓 `0.12.0` 搭配支持附件的 Companion `0.28.0`，可在聊天中发送图片和文件，也可只发送附件。历史消息可重新打开附件。 [Android 0.12.0 ARM64 APK](whale-companion-go-0.12.0-arm64.apk)
+安卓 `0.12.0` 搭配支持附件的 Companion `0.28.0`，可在聊天中发送图片和文件，也可只发送附件。历史消息可重新打开附件。
 
-安卓 `0.13.0` 小家增加手机阅读角。Companion `0.29.0` 正在执行大肥鱼的只读浏览时，会报告实际读取状态。 [Android 0.13.0 ARM64 APK](whale-companion-go-0.13.0-arm64.apk)
+安卓 `0.13.0` 小家增加手机阅读角。Companion `0.29.0` 正在执行大肥鱼的只读浏览时，会报告实际读取状态。
 
-安卓 `0.14.0` 在状态页增加「歌唱归档」。配对 Companion `0.31.0` 后可播放已核验归档的歌曲。 [Android 0.14.0 ARM64 APK](whale-companion-go-0.14.0-arm64.apk)
+安卓 `0.14.0` 在状态页增加「歌唱归档」。配对 Companion `0.31.0` 后可播放已核验归档的歌曲。
 
-安卓 `0.15.0` 小家支持 Companion `0.32.0` 的舞台歌唱状态和完成回执。 [Android 0.15.0 ARM64 APK](whale-companion-go-0.15.0-arm64.apk)
+安卓 `0.15.0` 小家支持 Companion `0.32.0` 的舞台歌唱状态和完成回执。
 
-安卓 `0.16.0` 可点选房间家具并打开聊天、活动或歌曲归档。Companion `0.33.0` 增加同源情境姿态、点头摇头及网页社区地图。 [Android 0.16.0 ARM64 APK](whale-companion-go-0.16.0-arm64.apk) · [小家与舞台说明](docs/dsh-integration.md#61-companion-0330-与-android-0160-情境舞台和互动小家)
+安卓 `0.16.0` 可点选房间家具并打开聊天、活动或歌曲归档。Companion `0.33.0` 增加同源情境姿态、点头摇头及网页社区地图。  · [小家与舞台说明](docs/dsh-integration.md#61-companion-0330-与-android-0160-情境舞台和互动小家)
 
-安卓 `0.17.0` 可从歌唱归档进入独立歌唱会话，发一份 WAV 和一句翻唱请求。入口随已配对宿主的能力显示。 [Android 0.17.0 ARM64 APK](whale-companion-go-0.17.0-arm64.apk)
+安卓 `0.17.0` 可从歌唱归档进入独立歌唱会话，发一份 WAV 和一句翻唱请求。入口随已配对宿主的能力显示。
 
-安卓 `0.18.0` 的小家可逛街区、打开各建筑对应的页面，并在营地联络站回看已确认的 Minecraft 经历。 [Android 0.18.0 ARM64 APK](whale-companion-go-0.18.0-arm64.apk)
+安卓 `0.18.0` 的小家可逛街区、打开各建筑对应的页面，并在营地联络站回看已确认的 Minecraft 经历。 [Android 0.18.0 ARM64 APK](https://github.com/ThySummer14/whale-companion-backup/releases/download/backup-2026-11-12/whale-companion-go-0.18.0-arm64.apk)
 
 安卓开发版可从营地联络站查看实时 Minecraft 状态。配对 Companion `0.51.0` 并由主人在本机授权后，手机可以暂停游戏动作并查看停稳回执。 [营地联络站](docs/dsh-integration.md#79-companion-0510-营地联络站)
 
@@ -129,7 +129,7 @@ pnpm check
 pnpm pack
 ```
 
-`pnpm check` 同时检查宿主、浏览器工作台和移动端 TypeScript。本地候选包 `dsh-companion-bot-0.118.0.tgz` 包含 DSH 插件、Minecraft worker 及可独立运行的语音工具。
+`pnpm check` 同时检查宿主、浏览器工作台和移动端 TypeScript。[`dsh-companion-bot-0.118.0.tgz`](https://github.com/ThySummer14/whale-companion-backup/releases/download/backup-2026-11-12/dsh-companion-bot-0.118.0.tgz) 包含 DSH 插件、Minecraft worker 及可独立运行的语音工具。
 
 `0.35.0` 增加独立的闲置会话压缩开关。开启后，宿主先确认同一轮记忆整理，再在场景空闲且输入达到阈值时调用 DSH 原生压缩。手机仍按原始消息日志显示历史和附件。 [空闲整理与压缩](docs/dsh-integration.md#63-companion-0350-闲置会话整理和压缩)
 
@@ -299,7 +299,7 @@ pnpm pack
 
 `0.118.0` 增加默认关闭的 `minecraftOffline`，仅供已配置 OVO 的回环测试服使用固定 `dafeiyu` 离线身份，不读取微软账号或改写白名单。远程地址、未配置 OVO 或与主人同名都会拒绝；Coopcraft 正式服仍使用独立正版账号和白名单，不能开启此选项。
 
-首次创建隔离 profile 时可先复制 web 模板。注意：下面的 `--from-default-profile` 会重置同名自定义 profile，只能用于新建或明确要重建的 profile。
+在 GitHub Release 下载 [0.118.0 备份包](https://github.com/ThySummer14/whale-companion-backup/releases/download/backup-2026-11-12/dsh-companion-bot-0.118.0.tgz) 后，首次创建隔离 profile 时可先复制 web 模板。注意：下面的 `--from-default-profile` 会重置同名自定义 profile，只能用于新建或明确要重建的 profile。
 
 ```sh
 dsh --profile companion --from-default-profile web --dump-config

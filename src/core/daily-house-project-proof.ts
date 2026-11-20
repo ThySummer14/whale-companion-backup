@@ -2,7 +2,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { z } from 'zod'
 import { DailyInitiativeRecord, DailyInitiativeSelectionReceipt } from './daily-initiative.ts'
 import { MinecraftHouseReceipt } from './minecraft-house.ts'
-import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY, HOUSE_PROJECT_SUPPLY_CAPABILITY, HOUSE_PROJECT_SUPPLY_EVENT,
+import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY, HOUSE_PROJECT_SUPPLY_CAPABILITY, HOUSE_PROJECT_SUPPLY_EVENT, HOUSE_PROJECT_VERIFICATION_EVENT,
   type MinecraftHouseProjectSectionReceipt } from './minecraft-house-project.ts'
 import { MinecraftHouseSupplyReceipt, MinecraftHouseSupplyRequest } from './minecraft-house-supply.ts'
 import type { MinecraftHouseProjectRepository } from './minecraft-house-project-repository.ts'
@@ -13,8 +13,8 @@ export const DAILY_HOUSE_PROJECT_LIMIT_MS = 7 * 60_000
 
 const Id = z.uuid()
 export const DailyHouseSelection = z.strictObject({
-  projectId: Id, zoneId: Id, section: z.int().min(0).max(5),
-  recovery: z.literal(true).optional(), deadline: z.int().positive(),
+  projectId: Id, zoneId: Id, section: z.int().min(0),
+  recovery: z.literal(true).optional(), fullProject: z.literal(true).optional(), deadline: z.int().positive(),
 })
 
 export const DailyHouseSupplySelection = z.strictObject({
@@ -28,6 +28,7 @@ const DailyHouseAction = z.object({
   windowRuleId: Id,
   date: z.string().refine(date => isSurveyWindowKey(surveyWindowKey(date))),
   expiresAt: z.int().positive(),
+  continuationId: Id.optional(),
   activityTaskId: Id,
   initiative: DailyInitiativeRecord,
   initiativeReceipt: DailyInitiativeSelectionReceipt,
@@ -51,7 +52,7 @@ const GAME_CONTEXT = 'game.minecraft'
 export interface DailyHouseProjectProofStore {
   taskById(id: string): TaskRecord | undefined
   activityByTask(taskId: string, kind: string, contextId: string): ActivityRecord | undefined
-  minecraftHouseProjects: Pick<MinecraftHouseProjectRepository, 'sectionReceiptByTask'>
+  minecraftHouseProjects: Pick<MinecraftHouseProjectRepository, 'sectionReceiptByTask' | 'get'>
 }
 
 export interface DailyHouseProjectProof {
@@ -61,13 +62,16 @@ export interface DailyHouseProjectProof {
   receipt: MinecraftHouseProjectSectionReceipt
   activityId: number
   at: string
+  fullProject?: true
 }
 
 function authorizedDailyChild(store: Pick<DailyHouseProjectProofStore, 'taskById'>, job: AutonomousJob,
-  permit: z.infer<typeof DailyHouseAction>, deadline: number, option: string, capability: string) {
+  permit: z.infer<typeof DailyHousePermit | typeof DailyHouseSupplyPermit>, deadline: number, option: string, capability: string) {
   const { task } = job
+  const continuation = permit.houseSection?.fullProject
+    ? `daily:${permit.date}:continue:${permit.houseSection.projectId}${permit.continuationId ? `:${permit.continuationId}` : ''}` : undefined
   if (!Id.safeParse(job.id).success || job.kind !== 'daily.choice' || job.contextId !== DAILY_AUTONOMY_CONTEXT ||
-    job.dedupeKey !== `daily:${permit.date}` || task.id !== job.id || task.contextId !== job.contextId ||
+    job.dedupeKey !== `daily:${permit.date}` && job.dedupeKey !== continuation || task.id !== job.id || task.contextId !== job.contextId ||
     task.capabilityId !== 'core.autonomy' || task.externalId !== `autonomy:daily.choice:${job.dedupeKey}` ||
     task.createdAt !== job.createdAt || (task.status !== 'running' && task.status !== 'succeeded') ||
     permit.initiative.option !== option || deadline > permit.expiresAt) return
@@ -86,14 +90,40 @@ function confirmedDailyHouseActivity(activity: ActivityRecord | undefined, job: 
   const finished = Date.parse(child.updatedAt)
   const at = Date.parse(activity.occurredAt)
   const parentUpdated = Date.parse(job.task.updatedAt)
+  const limit = DailyHousePermit.safeParse(job.payload).data?.houseSection?.fullProject ? Number.MAX_SAFE_INTEGER : DAILY_HOUSE_PROJECT_LIMIT_MS
   return created <= started && started <= finished && finished <= at && at < deadline &&
-    deadline - started <= DAILY_HOUSE_PROJECT_LIMIT_MS && created <= parentUpdated &&
+    deadline - started <= limit && created <= parentUpdated &&
     (job.task.status === 'running' || at <= parentUpdated)
+}
+
+function verifiedDailyFullHouseProject(store: DailyHouseProjectProofStore, job: AutonomousJob, permit: z.infer<typeof DailyHousePermit>) {
+  const selected = permit.houseSection
+  const child = authorizedDailyChild(store, job, permit, selected.deadline, 'house:all', 'minecraft.house-project.autonomous')
+  if (!child) return
+  try {
+    const project = store.minecraftHouseProjects.get(selected.projectId)
+    const verification = project?.verification
+    if (!project || project.zoneId !== selected.zoneId || project.sections.some(section => section.status !== 'built') || verification?.matched !== true) return
+    const checked = project.sections.reduce((total, section) => total + section.layout.blocks.length, 0)
+    if (verification.checked !== checked) return
+    const activity = store.activityByTask(child.id, HOUSE_PROJECT_VERIFICATION_EVENT, GAME_CONTEXT)
+    if (!confirmedDailyHouseActivity(activity, job, child, HOUSE_PROJECT_VERIFICATION_EVENT, selected.deadline)) return
+    if (activity.data.projectId !== selected.projectId || activity.data.dailyTaskId !== job.id ||
+      activity.data.checked !== checked || activity.data.checkedAt !== verification.checkedAt || activity.data.matched !== true) return
+    const placed = project.sections.reduce((total, section) => total + (section.receipt?.placed ?? 0), 0)
+    const receipt = MinecraftHouseReceipt.parse({ built: true, zoneId: selected.zoneId, checked, placed, consumed: {}, creative: true })
+    return { projectId: project.id, zoneId: project.zoneId, section: selected.section, fullProject: true as const,
+      receipt, activityId: activity.id, at: activity.occurredAt }
+  } catch (error) {
+    if (error instanceof SyntaxError) return
+    throw error
+  }
 }
 
 export function verifiedDailyHouseProjectSection(store: DailyHouseProjectProofStore, job: AutonomousJob): DailyHouseProjectProof | undefined {
   const permit = DailyHousePermit.safeParse(job.payload).data
   if (!permit) return
+  if (permit.houseSection.fullProject) return verifiedDailyFullHouseProject(store, job, permit)
   const selected = permit.houseSection
   const child = authorizedDailyChild(store, job, permit, selected.deadline, `house:${selected.section + 1}`, HOUSE_PROJECT_SECTION_CAPABILITY)
   if (!child) return
@@ -120,7 +150,8 @@ export function verifiedDailyHouseProjectSection(store: DailyHouseProjectProofSt
   return { projectId: proof.projectId, zoneId: proof.zoneId, section: proof.section, receipt: saved, activityId: activity.id, at: activity.occurredAt }
 }
 
-export function dailyHouseProjectReflectionFact({ section, receipt }: Pick<DailyHouseProjectProof, 'section' | 'receipt'>): string {
+export function dailyHouseProjectReflectionFact({ section, receipt, fullProject }: Pick<DailyHouseProjectProof, 'section' | 'receipt' | 'fullProject'>): string {
+  if (fullProject) return `在 Minecraft 自主完成整栋工程，核对 ${receipt.checked} 处位置，实际补建 ${receipt.placed} 块。`
   const action = receipt.recovery ? '通过站位恢复流程续建' : '自主施工'
   return `在 Minecraft ${action}第 ${section + 1} 个分区，核对 ${receipt.checked} 处位置，实际放置 ${receipt.placed} 块。`
 }

@@ -13,6 +13,8 @@ import { BilibiliSubtitleRepository } from './bilibili-subtitles.ts'
 import { DeviceNoticeRepository } from './notices.ts'
 import { MinecraftHouseRepository } from './minecraft-house-repository.ts'
 import { MinecraftHouseProjectRepository } from './minecraft-house-project-repository.ts'
+import { VoxelBlueprintRepository } from './minecraft-voxel-blueprints.ts'
+import { VoxelBuildRepository } from './minecraft-blueprint-build.ts'
 import { MinecraftPlaceRepository } from './minecraft-place-repository.ts'
 import { MAX_SONG_VOCAL_SAMPLES } from '../protocol/singing.ts'
 import type { MinecraftCampControl } from '../protocol/api.ts'
@@ -37,7 +39,7 @@ import {
   type WorkbenchStats,
 } from './model.ts'
 
-const SCHEMA_VERSION = 44
+const SCHEMA_VERSION = 49
 
 type PersonaFields = Pick<Persona, 'name' | 'tagline' | 'description'>
 type PersonaRow = PersonaFields & { version: number; updated_at: string; change_kind: PersonaRevision['change']; reason: string | null; restored_from: number | null }
@@ -69,6 +71,8 @@ export class CompanionStore {
   readonly notices: DeviceNoticeRepository
   readonly minecraftHouses: MinecraftHouseRepository
   readonly minecraftHouseProjects: MinecraftHouseProjectRepository
+  readonly voxelBlueprints: VoxelBlueprintRepository
+  readonly voxelBuilds: VoxelBuildRepository
   readonly minecraftPlaces: MinecraftPlaceRepository
 
   constructor(path: string, private readonly activityRetention = 10_000) {
@@ -645,6 +649,113 @@ export class CompanionStore {
           PRAGMA user_version=44;
         `)
       })
+      if (version < 45) this.transaction(() => {
+        if (Number(this.db.prepare('PRAGMA user_version').get()?.user_version) >= 45) return
+        this.db.exec(`
+          CREATE TABLE minecraft_house_project_section_v45 (
+            project_id TEXT NOT NULL REFERENCES minecraft_house_project(id),
+            section_index INTEGER NOT NULL CHECK(section_index BETWEEN 0 AND 7),
+            blueprint_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','built','interrupted')),
+            task_id TEXT REFERENCES task(id),
+            receipt_json TEXT,
+            reason TEXT,
+            PRIMARY KEY(project_id,section_index),
+            CHECK ((status='built')=(receipt_json IS NOT NULL)),
+            CHECK ((status='pending')=(task_id IS NULL)),
+            CHECK ((status='interrupted')=(reason IS NOT NULL))
+          );
+          INSERT INTO minecraft_house_project_section_v45 SELECT * FROM minecraft_house_project_section;
+          DROP TABLE minecraft_house_project_section;
+          ALTER TABLE minecraft_house_project_section_v45 RENAME TO minecraft_house_project_section;
+          PRAGMA user_version=45;
+        `)
+      })
+      if (version < 46) this.transaction(() => {
+        if (Number(this.db.prepare('PRAGMA user_version').get()?.user_version) >= 46) return
+        this.db.exec(`
+          CREATE TABLE minecraft_house_project_section_v46 (
+            project_id TEXT NOT NULL REFERENCES minecraft_house_project(id),
+            section_index INTEGER NOT NULL,
+            blueprint_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','running','built','interrupted')),
+            task_id TEXT REFERENCES task(id),
+            receipt_json TEXT,
+            reason TEXT,
+            PRIMARY KEY(project_id,section_index),
+            CHECK ((status='built')=(receipt_json IS NOT NULL)),
+            CHECK ((status='pending')=(task_id IS NULL)),
+            CHECK ((status='interrupted')=(reason IS NOT NULL))
+          );
+          INSERT INTO minecraft_house_project_section_v46 SELECT * FROM minecraft_house_project_section;
+          DROP TABLE minecraft_house_project_section;
+          ALTER TABLE minecraft_house_project_section_v46 RENAME TO minecraft_house_project_section;
+          PRAGMA user_version=46;
+        `)
+        if (!this.db.prepare("SELECT 1 FROM pragma_table_info('minecraft_house_project') WHERE name='renovate'").get()) {
+          this.db.exec('ALTER TABLE minecraft_house_project ADD COLUMN renovate INTEGER NOT NULL DEFAULT 0 CHECK(renovate IN(0,1))')
+        }
+      })
+      if (version < 47) {
+        this.db.exec('PRAGMA foreign_keys=OFF')
+        try {
+          this.transaction(() => {
+            if (Number(this.db.prepare('PRAGMA user_version').get()?.user_version) >= 47) return
+            this.db.exec(`
+          CREATE TABLE minecraft_build_zone_v47 (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            dimension TEXT NOT NULL,
+            x INTEGER NOT NULL,
+            y INTEGER NOT NULL,
+            z INTEGER NOT NULL,
+            radius INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            revoked_at TEXT
+          );
+          INSERT INTO minecraft_build_zone_v47 SELECT * FROM minecraft_build_zone;
+          DROP TABLE minecraft_build_zone;
+          ALTER TABLE minecraft_build_zone_v47 RENAME TO minecraft_build_zone;
+          CREATE INDEX IF NOT EXISTS minecraft_build_zone_active ON minecraft_build_zone(revoked_at, dimension, updated_at DESC);
+          PRAGMA user_version=47;
+        `)
+          })
+        } finally {
+          this.db.exec('PRAGMA foreign_keys=ON')
+        }
+      }
+      if (version < 48) this.transaction(() => {
+        if (Number(this.db.prepare('PRAGMA user_version').get()?.user_version) >= 48) return
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS minecraft_voxel_blueprint (
+            id TEXT PRIMARY KEY REFERENCES task(id),
+            name TEXT NOT NULL,
+            info_json TEXT NOT NULL,
+            source_json TEXT NOT NULL,
+            schematic_id TEXT NOT NULL REFERENCES media_asset(id),
+            preview_id TEXT NOT NULL REFERENCES media_asset(id),
+            created_at TEXT NOT NULL,
+            approved_at TEXT
+          );
+          PRAGMA user_version=48;
+        `)
+      })
+      if (version < 49) this.transaction(() => {
+        this.db.exec(`
+          CREATE TABLE IF NOT EXISTS minecraft_voxel_build (
+            blueprint_id TEXT PRIMARY KEY REFERENCES minecraft_voxel_blueprint(id),
+            zone_id TEXT NOT NULL REFERENCES minecraft_build_zone(id),
+            zone_name TEXT NOT NULL,
+            task_id TEXT NOT NULL REFERENCES task(id),
+            status TEXT NOT NULL CHECK (status IN ('running','interrupted','built')),
+            updated_at TEXT NOT NULL,
+            receipt_json TEXT,
+            reason TEXT
+          );
+          PRAGMA user_version=49;
+        `)
+      })
       this.db.exec(`
         CREATE INDEX IF NOT EXISTS activity_time ON activity(id DESC);
         CREATE INDEX IF NOT EXISTS activity_session ON activity(session_id, id DESC);
@@ -660,11 +771,13 @@ export class CompanionStore {
       this.memory = new MemoryRepository(this.db, input => this.recordActivity(input), operation => this.transaction(operation))
       this.minecraftHouses = new MinecraftHouseRepository(this.db, operation => this.transaction(operation))
       this.minecraftHouseProjects = new MinecraftHouseProjectRepository(this.db, operation => this.transaction(operation))
+      this.voxelBlueprints = new VoxelBlueprintRepository(this.db)
+      this.voxelBuilds = new VoxelBuildRepository(this.db)
       this.minecraftPlaces = new MinecraftPlaceRepository(this.db)
       this.media = new MediaRepository(this.db)
       this.gameLearning = new GameLearningRepository(this.db, input => this.recordActivity(input), operation => this.transaction(operation))
       this.bilibili = new BilibiliQueueRepository(this.db, operation => this.transaction(operation))
-      this.feed = new FeedRepository(this.db, this.media, this.bilibili, operation => this.transaction(operation))
+      this.feed = new FeedRepository(this.db, this.media, this.bilibili, this.minecraftHouseProjects, this.memory, operation => this.transaction(operation))
       this.bilibiliSubtitles = new BilibiliSubtitleRepository(this.db, operation => this.transaction(operation))
       this.autonomy = new AutonomyRepository(this.db, {
         createTask: (input, beforeActivity) => this.createTask(input, beforeActivity),
@@ -833,7 +946,7 @@ export class CompanionStore {
     if (!/^[a-z0-9_:.-]{1,64}$/u.test(input.dimension)) throw new Error('Invalid build zone dimension')
     if (![input.x, input.y, input.z, input.radius].every(Number.isSafeInteger)) throw new Error('Invalid build zone coordinates')
     if (Math.abs(input.x) > 30_000_000 || Math.abs(input.z) > 30_000_000 || input.y < -2048 || input.y > 2032) throw new Error('Invalid build zone coordinates')
-    if (input.radius < 2 || input.radius > 8) throw new Error('Build zone radius must be between 2 and 8')
+    if (input.radius < 2) throw new Error('Build zone radius must be at least 2')
     const now = new Date().toISOString()
     const zone: MinecraftBuildZone = { ...input, name, id: randomUUID(), createdAt: now, updatedAt: now }
     this.db.prepare(`INSERT INTO minecraft_build_zone

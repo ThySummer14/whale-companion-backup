@@ -1,0 +1,216 @@
+--- a/src/main/java/baritone/server/HomeBuildPlan.java
++++ b/src/main/java/baritone/server/HomeBuildPlan.java
+@@ -22,7 +22,7 @@
+ 
+     HomeBuildPlan {
+         if (width < 1 || width > 5 || height < 1 || height > 5 || depth < 1 || depth > 5
+-                || flat.length() != width * height * depth || !flat.matches("[.oscg]+")) {
++                || flat.length() != width * height * depth || !flat.matches("[.oscgpkydle]+")) {
+             throw new IllegalArgumentException("homebuild-blueprint-invalid");
+         }
+         long solid = flat.chars().filter(code -> code != '.').count();
+@@ -68,6 +68,12 @@
+             case 's' -> Blocks.SPRUCE_PLANKS;
+             case 'c' -> Blocks.COBBLESTONE;
+             case 'g' -> Blocks.GLASS;
++            case 'p' -> Blocks.CHERRY_PLANKS;
++            case 'k' -> Blocks.PINK_CONCRETE;
++            case 'y' -> Blocks.SMOOTH_SANDSTONE;
++            case 'd' -> Blocks.DARK_OAK_PLANKS;
++            case 'l' -> Blocks.LANTERN;
++            case 'e' -> Blocks.CHERRY_LEAVES;
+             default -> Blocks.AIR;
+         };
+         return new Cell(origin.offset(index % width, index / (width * depth), index / width % depth), block);
+@@ -114,9 +120,11 @@
+         if (!complete) {
+             Map<Block, Integer> needed = new LinkedHashMap<>();
+             for (Cell cell : missing) needed.merge(cell.block(), 1, Integer::sum);
+-            for (var material : needed.entrySet()) {
+-                if (player.getInventory().countItem(material.getKey().asItem()) < material.getValue()) {
+-                    return new Inspection(checked, List.of(), "homebuild-materials");
++            if (!player.getAbilities().instabuild) {
++                for (var material : needed.entrySet()) {
++                    if (player.getInventory().countItem(material.getKey().asItem()) < material.getValue()) {
++                        return new Inspection(checked, List.of(), "homebuild-materials");
++                    }
+                 }
+             }
+             if (!hasSupportChain(player, missing)) return new Inspection(checked, List.of(), "homebuild-unsupported");
+--- a/src/main/java/baritone/server/HomeBuildTask.java
++++ b/src/main/java/baritone/server/HomeBuildTask.java
+@@ -53,6 +53,7 @@
+     private HomeBuildPlan.Cell placement;
+     private boolean verticalRoutes;
+     private boolean lowLintelRoutes;
++    private boolean includeDeferredFloors;
+     private int stepTicks;
+     private int ticks;
+     private int placed;
+@@ -78,8 +79,8 @@
+                 .collect(Collectors.toSet());
+         boolean steppedRoof = plan.hasSteppedRoof();
+         int baseY = plan.origin().getY();
+-        pending.sort(Comparator.<HomeBuildPlan.Cell>comparingInt(cell -> placementBand(cell.pos().getY() - baseY, steppedRoof,
+-                        solids.contains(cell.pos().above()), deferredFloors.contains(cell.pos())))
++        pending.sort(Comparator.<HomeBuildPlan.Cell>comparingInt(cell -> cell.block() == Blocks.LANTERN && solids.contains(cell.pos().above()) ? 5
++                        : placementBand(cell.pos().getY() - baseY, steppedRoof, solids.contains(cell.pos().above()), deferredFloors.contains(cell.pos())))
+                 .thenComparingInt(cell -> cell.pos().getY())
+                 .thenComparingInt(cell -> deferredFloors.contains(cell.pos()) ? -cell.pos().distManhattan(home) : 0));
+     }
+@@ -108,7 +109,7 @@
+     static boolean ready(Baritone baritone, ServerPlayer player, HomeBuildPlan plan) {
+         BlockPos feet = player.blockPosition();
+         return baritone.getPlayerContext().player() == player && !baritone.hasActiveTask() && !baritone.getPauseProcess().isPaused()
+-                && CampSurveyTask.safePlayer(player) && !CampSurveyTask.threat(player, player.serverLevel())
++                && CampSurveyTask.safePlayer(player, false, true) && !CampSurveyTask.threat(player, player.serverLevel())
+                 && plan.outside(feet) && centered(player, feet) && stationary(player) && stand(plan, player, feet);
+     }
+ 
+@@ -178,7 +179,7 @@
+         if (++ticks > (target == null ? MAX_TICKS : MAX_SINGLE_TICKS)) { fail("homebuild-timeout"); return; }
+         BlockPos stepTo = route.peekFirst();
+         boolean takingStep = stepFrom != null && stepTo != null && stepFrom.getY() != stepTo.getY();
+-        if (baritone.getPlayerContext().player() != player || player.isRemoved() || !CampSurveyTask.safePlayer(player, takingStep)
++        if (baritone.getPlayerContext().player() != player || player.isRemoved() || !CampSurveyTask.safePlayer(player, takingStep, true)
+                 || player.getHealth() < initialHealth || !plan.authorized(player, player.blockPosition())
+                 || CampSurveyTask.threat(player, player.serverLevel())) { fail("homebuild-unsafe-player"); return; }
+         if (!route.isEmpty()) { walk(); return; }
+@@ -243,6 +244,10 @@
+             lowLintelRoutes = true;
+             if (findPlacement(current, false)) return;
+         }
++        if (recovery && !includeDeferredFloors && pending.stream().anyMatch(cell -> deferredFloors.contains(cell.pos()))) {
++            includeDeferredFloors = true;
++            if (findPlacement(current, false)) return;
++        }
+         failRecoverably(current, missedStances.isEmpty() ? "homebuild-unreachable-placement" : "homebuild-visibility-changed");
+     }
+ 
+@@ -251,10 +256,34 @@
+         verticalRoutes = true;
+         lowLintelRoutes = true;
+         try {
+-            return findPlacement(home, true);
++            if (findPlacement(home, true)) return true;
++            if (!pending.stream().anyMatch(cell -> deferredFloors.contains(cell.pos()))) return false;
++            includeDeferredFloors = true;
++            boolean reachable = findPlacement(home, true);
++            if (!reachable) diagnoseRecovery();
++            return reachable;
+         } finally {
+             verticalRoutes = false;
+             lowLintelRoutes = false;
++        }
++    }
++
++    private void diagnoseRecovery() {
++        if (!Baritone.settings().diagnosticLogging.value) return;
++        Map<BlockPos, BlockPos> reachable = paths(home, null);
++        for (HomeBuildPlan.Cell cell : pending) {
++            BlockPos target = cell.pos();
++            List<Direction> support = supports(target);
++            int visible = 0;
++            if (emptyTarget(target, true)) {
++                for (BlockPos feet : reachable.keySet()) {
++                    Vec3 eye = feet.equals(home) ? player.getEyePosition() : Vec3.atBottomCenterOf(feet).add(0, 1.62D, 0);
++                    if (hit(target, eye, support) != null) visible++;
++                }
++            }
++            System.out.println("[CBI-DIAG] homebuild recovery target=" + target.toShortString()
++                    + " deferred=" + deferredFloors.contains(target) + " empty=" + emptyTarget(target, true)
++                    + " support=" + support.size() + " stances=" + reachable.size() + " visible=" + visible);
+         }
+     }
+ 
+@@ -265,7 +294,7 @@
+             if (!preview && finalRoutes) fail("homebuild-retreat-unconfirmed");
+             return !preview && finalRoutes;
+         }
+-        boolean shellPending = pending.stream().anyMatch(cell -> !deferredFloors.contains(cell.pos()));
++        boolean shellPending = !includeDeferredFloors && pending.stream().anyMatch(cell -> !deferredFloors.contains(cell.pos()));
+         for (HomeBuildPlan.Cell cell : pending) {
+             BlockPos target = cell.pos();
+             if (shellPending && deferredFloors.contains(target)) continue;
+@@ -346,18 +375,29 @@
+             return;
+         }
+         var item = cell.block().asItem();
++        boolean creative = player.getAbilities().instabuild;
+         int before = player.getInventory().countItem(item);
+-        if (before < 1 || !baritone.getInventoryController().selectItemForBuilder(stack -> stack.is(item))) {
++        var original = creative ? player.getInventory().getSelected() : null;
++        if (creative) {
++            player.getInventory().setItem(player.getInventory().selected, item.getDefaultInstance());
++        } else if (before < 1 || !baritone.getInventoryController().selectItemForBuilder(stack -> stack.is(item))) {
+             failRecoverably(current, "homebuild-materials"); return;
+         }
+-        if (!baritone.getFakeInteractionController().placeSelectedBlock(target, hit) || !player.serverLevel().getBlockState(target).is(cell.block())) {
+-            fail("homebuild-placement-unconfirmed"); return;
+-        }
+-        placed++;
+-        if (player.getInventory().countItem(item) != before - 1) { fail("homebuild-inventory-unconfirmed"); return; }
+-        pending.remove(cell);
+-        missedStances.clear();
+-        placement = null;
++        try {
++            if (!baritone.getFakeInteractionController().placeSelectedBlock(target, hit) || !player.serverLevel().getBlockState(target).is(cell.block())) {
++                fail("homebuild-placement-unconfirmed"); return;
++            }
++            placed++;
++            if (!creative && player.getInventory().countItem(item) != before - 1) { fail("homebuild-inventory-unconfirmed"); return; }
++            pending.remove(cell);
++            missedStances.clear();
++            placement = null;
++        } finally {
++            if (creative) {
++                player.getInventory().setItem(player.getInventory().selected, original);
++                player.inventoryMenu.broadcastChanges();
++            }
++        }
+     }
+ 
+     private void walk() {
+--- a/src/main/java/baritone/server/CampSurveyTask.java
++++ b/src/main/java/baritone/server/CampSurveyTask.java
+@@ -90,9 +90,14 @@
+     }
+ 
+     static boolean safePlayer(ServerPlayer player, boolean allowAirborne) {
++        return safePlayer(player, allowAirborne, false);
++    }
++
++    static boolean safePlayer(ServerPlayer player, boolean allowAirborne, boolean allowCreative) {
++        GameType gameMode = player.gameMode.getGameModeForPlayer();
+         return player.isAlive() && !player.isPassenger() && !player.isFallFlying()
+                 && !player.isSwimming() && !player.isOnFire() && !player.isUsingItem() && (allowAirborne || player.onGround())
+-                && player.gameMode.getGameModeForPlayer() == GameType.SURVIVAL
++                && (gameMode == GameType.SURVIVAL || allowCreative && gameMode == GameType.CREATIVE)
+                 && player.getBbWidth() <= 0.62F && player.getBbHeight() <= 1.82F
+                 && player.getHealth() >= 16.0F
+                 && player.getFoodData().getFoodLevel() >= 14;
+--- a/src/test/java/baritone/server/HomeBuildPlanTest.java
++++ b/src/test/java/baritone/server/HomeBuildPlanTest.java
+@@ -34,6 +34,22 @@
+         assertSame(Blocks.AIR, cells.get(4).block());
+         assertEquals(new BlockPos(-22, 81, 29), cells.get(6).pos());
+         assertEquals(new BlockPos(-20, 81, 30), cells.getLast().pos());
++    }
++
++    @Test
++    public void mapsTheWholeExtendedPaletteToRealBlocks() {
++        HomeBuildPlan plan = new HomeBuildPlan(ZONE, 5, 1, 2, "oscgpkydle");
++        var cells = plan.cells();
++        assertSame(Blocks.OAK_PLANKS, cells.get(0).block());
++        assertSame(Blocks.SPRUCE_PLANKS, cells.get(1).block());
++        assertSame(Blocks.COBBLESTONE, cells.get(2).block());
++        assertSame(Blocks.GLASS, cells.get(3).block());
++        assertSame(Blocks.CHERRY_PLANKS, cells.get(4).block());
++        assertSame(Blocks.PINK_CONCRETE, cells.get(5).block());
++        assertSame(Blocks.SMOOTH_SANDSTONE, cells.get(6).block());
++        assertSame(Blocks.DARK_OAK_PLANKS, cells.get(7).block());
++        assertSame(Blocks.LANTERN, cells.get(8).block());
++        assertSame(Blocks.CHERRY_LEAVES, cells.get(9).block());
+     }
+ 
+     @Test

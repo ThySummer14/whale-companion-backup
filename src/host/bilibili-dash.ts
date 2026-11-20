@@ -114,20 +114,21 @@ export async function readBilibiliFragment(track: Track, kind: TrackKind, start:
   return { data: Buffer.concat([head.subarray(0, track.initialization.last + 1), fragments]), skip: Math.max(0, start - left.from) }
 }
 
-async function decode(ffmpeg: string, input: Buffer, options: string[], limit: number, signal: AbortSignal): Promise<Buffer> {
+async function decode(ffmpeg: string, input: Buffer, options: string[], limit: number, signal: AbortSignal, audio?: Buffer): Promise<Buffer> {
   signal.throwIfAborted()
   return new Promise((resolve, reject) => {
     const child = spawn(ffmpeg, ['-hide_banner', '-loglevel', 'error', '-nostdin', '-protocol_whitelist', 'pipe',
-      '-max_alloc', '33554432', '-threads', '1', '-filter_threads', '1', '-f', 'mov', '-i', 'pipe:0', ...options],
-    { stdio: ['pipe', 'pipe', 'ignore'], signal, killSignal: 'SIGKILL' })
+      '-max_alloc', '33554432', '-threads', '1', '-filter_threads', '1', '-f', 'mov', '-i', 'pipe:0',
+      ...(audio ? ['-threads', '1', '-f', 'mov', '-i', 'pipe:3'] : []), ...options],
+    { stdio: ['pipe', 'pipe', 'ignore', ...(audio ? ['pipe' as const] : [])], signal, killSignal: 'SIGKILL' })
     const output: Buffer[] = []
     let bytes = 0
-    child.stdout.on('data', (chunk: Buffer) => {
+    child.stdout!.on('data', (chunk: Buffer) => {
       bytes += chunk.length
       if (bytes > limit) child.kill('SIGKILL')
       else output.push(chunk)
     })
-    child.stdin.on('error', () => {})
+    child.stdin!.on('error', () => {})
     child.on('error', (error: NodeJS.ErrnoException) => {
       reject(signal.aborted ? signal.reason : new DeviceAuthError(503, error.code === 'ENOENT' ? 'bili-clip-decoder-unavailable' : 'bili-clip-decode-failed'))
     })
@@ -137,8 +138,23 @@ async function decode(ffmpeg: string, input: Buffer, options: string[], limit: n
       else if (code !== 0 || !bytes) reject(new DeviceAuthError(422, 'bili-clip-decode-failed'))
       else resolve(Buffer.concat(output, bytes))
     })
-    child.stdin.end(input)
+    child.stdin!.end(input)
+    if (audio) {
+      const inputAudio = child.stdio[3] as NodeJS.WritableStream
+      inputAudio.on('error', () => {})
+      inputAudio.end(audio)
+    }
   })
+}
+
+export function decodeBilibiliVideo(ffmpeg: string, video: { data: Buffer; skip: number }, seconds: number, signal: AbortSignal,
+  audio?: { data: Buffer; skip: number }): Promise<Buffer> {
+  const picture = `trim=start=${video.skip.toFixed(4)}:duration=${seconds},setpts=PTS-STARTPTS,fps=4,scale=480:-2`
+  const sound = audio ? ['-map', '1:a:0', '-af', `atrim=start=${audio.skip.toFixed(4)}:duration=${seconds},asetpts=PTS-STARTPTS`,
+    '-c:a', 'aac', '-ac', '1', '-ar', '24000', '-b:a', '64k'] : ['-an']
+  return decode(ffmpeg, video.data, ['-map', '0:v:0', '-vf', picture, ...sound,
+    '-threads', '1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-preset', 'ultrafast', '-crf', '28', '-t', String(seconds),
+    '-abort_on', 'empty_output_stream', '-movflags', 'frag_keyframe+empty_moov', '-f', 'mp4', 'pipe:1'], 3 * 1024 * 1024, signal, audio?.data)
 }
 
 export async function decodeBilibiliFrames(ffmpeg: string, { data, skip }: { data: Buffer; skip: number },

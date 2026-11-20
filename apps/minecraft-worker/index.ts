@@ -520,13 +520,15 @@ const server = createServer((req, res) => {
       const visitRevisit = path === '/api/camp/visit/revisit'
       const visitPatrolSegment = path === '/api/camp/visit/patrol-segment'
       const visitGather = path === '/api/camp/visit/gather-preview' || path === '/api/camp/visit/gather'
+      const voxelAction = path === '/api/blueprint/preview' || path === '/api/blueprint/build'
       const houseAction = ['/api/house/preview', '/api/house/build', '/api/house/candidates', '/api/house/cell', '/api/house/verify',
         '/api/house/project-verify', '/api/house/recovery-preview', '/api/house/recover',
-        '/api/house/supply-preview', '/api/house/supply'].includes(path)
+        '/api/house/supply-preview', '/api/house/supply', '/api/house/support', '/api/house/creative-build'].includes(path)
       const visitAction = visitRevisit || visitPatrolSegment || visitGather || path === '/api/camp/visit/supply-preview' || path === '/api/camp/visit/supply' ||
         path === '/api/camp/visit/build-preview' || path === '/api/camp/visit/build'
       if (visitAction && url.searchParams.size) throw new Error('minecraft-camp-visit-invalid-request')
       if (houseAction && (req.url?.includes('?') || visitId !== undefined)) throw new Error('minecraft-house-invalid-request')
+      if (voxelAction && (req.url?.includes('?') || visitId !== undefined)) throw new Error('blueprint-invalid-request')
       if (path === '/api/shield' && (req.url?.includes('?') || visitId !== undefined)) throw new Error('shield-invalid-request')
       if ((visitAction || visitId !== undefined) &&
         ((!visitAction && path !== '/api/survey-preview' && path !== '/api/survey') || !z.uuid().safeParse(visitId).success)) {
@@ -577,6 +579,17 @@ const server = createServer((req, res) => {
             z.strictObject({}).parse(input)
             result = path === '/api/camp/pause' ? await world.pauseCamp() : world.resumeCamp()
             break
+          case '/api/blueprint/preview':
+          case '/api/blueprint/build': {
+            if (!(world instanceof CbiWorld)) throw new Error('blueprint-server-unavailable')
+            const controller = new AbortController()
+            const disconnect = () => controller.abort()
+            res.once('close', disconnect)
+            if (res.destroyed) disconnect()
+            try { result = await world.voxelBlueprint(path === '/api/blueprint/build' ? 'build' : 'preview', input, controller.signal) }
+            finally { res.off('close', disconnect) }
+            break
+          }
           case '/api/wardrobe': {
             if (!(world instanceof CbiWorld)) throw new Error('minecraft-wardrobe-unavailable')
             const choice = z.strictObject({ id: MinecraftWardrobeId }).safeParse(input)
@@ -680,6 +693,8 @@ const server = createServer((req, res) => {
           case '/api/house/cell':
           case '/api/house/verify':
           case '/api/house/project-verify':
+          case '/api/house/support':
+          case '/api/house/creative-build':
           case '/api/house/supply-preview':
           case '/api/house/supply':
           case '/api/build-authorized': {
@@ -713,6 +728,8 @@ const server = createServer((req, res) => {
                 case '/api/house/cell': result = await world.placeHouseCell(input, controller.signal); break
                 case '/api/house/verify': result = await world.verifyHouse(input, controller.signal); break
                 case '/api/house/project-verify': result = await world.verifyHouseProject(input, controller.signal); break
+                case '/api/house/support': result = await world.supportHouse(input, controller.signal); break
+                case '/api/house/creative-build': result = await world.buildHouseCreative(input, controller.signal); break
                 case '/api/house/supply-preview': result = await world.houseSupplyPreview(input, controller.signal); break
                 case '/api/house/supply': result = await world.houseSupply(input, controller.signal); break
                 case '/api/build-authorized': result = await world.buildCamp(input, controller.signal); break
@@ -734,8 +751,8 @@ const server = createServer((req, res) => {
       if (!res.destroyed && !res.headersSent) json(res, 200, result)
     } catch (error) {
       const message = publicError(error)
-      if (!res.destroyed) json(res, ['minecraft-wardrobe-invalid-request', 'minecraft-camp-visit-invalid-request', 'minecraft-house-invalid-request', 'shield-invalid-request'].includes(message) ? 400
-        : message === 'minecraft-wardrobe-unconfirmed' || message === 'shield-unconfirmed' || /^house-[a-z-]+-unconfirmed$/u.test(message) || /^minecraft-(?:storage|smelt)-[a-z-]+-unconfirmed$/u.test(message) ? 502
+      if (!res.destroyed) json(res, ['minecraft-wardrobe-invalid-request', 'minecraft-camp-visit-invalid-request', 'minecraft-house-invalid-request', 'shield-invalid-request', 'blueprint-invalid-request'].includes(message) ? 400
+        : message === 'minecraft-wardrobe-unconfirmed' || message === 'shield-unconfirmed' || /^(?:house|blueprint)-[a-z-]+-unconfirmed$/u.test(message) || /^minecraft-(?:storage|smelt)-[a-z-]+-unconfirmed$/u.test(message) ? 502
         : message === 'house-timeout' || message === 'shield-timeout' ? 504
         : message.startsWith('shield-') || /^night-[a-z-]+$/u.test(message) ? 409
         : message.startsWith('minecraft-camp-visit-') || /^homebuild-[a-z0-9-]+$/u.test(message) ? 409

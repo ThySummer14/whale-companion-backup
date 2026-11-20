@@ -1,11 +1,25 @@
 import { z } from 'zod'
 
-export const MinecraftMilestoneMoment = z.strictObject({
-  kind: z.enum(['camp-project', 'house']),
+const MomentFact = {
   taskId: z.uuid(),
   summary: z.string().min(1).max(120).regex(/^[^\p{Cc}\p{Cf}]+$/u),
-})
+}
+export const MinecraftMilestoneMoment = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.enum(['camp-project', 'house']), ...MomentFact }),
+  z.strictObject({ kind: z.literal('house-project'), projectId: z.uuid(), ...MomentFact }),
+])
 export type MinecraftMilestoneMoment = z.infer<typeof MinecraftMilestoneMoment>
+
+export const MINECRAFT_SHARE_TTL_MS = 24 * 60 * 60_000
+
+export function minecraftShareDedupeKey(moment: Pick<MinecraftMilestoneMoment, 'taskId'> | MinecraftMilestoneMoment): string {
+  return 'projectId' in moment ? `house-project:${moment.projectId}` : moment.taskId
+}
+
+export function minecraftHouseProjectShareMoment(taskId: string, proof: { projectId: string; sections: number; checked: number }) {
+  return { kind: 'house-project' as const, taskId, projectId: proof.projectId,
+    summary: `在 Minecraft 完成了一项建筑工程。整栋验收核对了 ${proof.sections} 个分区的 ${proof.checked} 处方块和留空。` }
+}
 
 export const MinecraftMilestoneReflection = z.string().trim().min(2).max(50)
   .regex(/^我[\p{Script=Han}，。！？、…]+$/u)

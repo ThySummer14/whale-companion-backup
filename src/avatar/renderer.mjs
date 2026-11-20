@@ -6,6 +6,28 @@ async function readProfile(basePath) {
   return response.json()
 }
 
+function fitModelTextures(model, gl, Texture) {
+  const limit = gl.getParameter(gl.MAX_TEXTURE_SIZE)
+  if (!limit) throw new Error('无法读取 WebGL 贴图尺寸上限')
+  for (const texture of new Set(model.textures)) {
+    const { realWidth: width, realHeight: height, resource, alphaMode, mipmap, scaleMode, wrapMode } = texture.baseTexture
+    const longestEdge = Math.max(width, height)
+    if (longestEdge <= limit) continue
+
+    // Cubism uses normalized UVs, so resize the whole atlas and keep its texture index.
+    const factor = limit / longestEdge
+    const atlas = document.createElement('canvas')
+    atlas.width = Math.max(1, Math.floor(width * factor))
+    atlas.height = Math.max(1, Math.floor(height * factor))
+    const context = atlas.getContext('2d')
+    if (!context) throw new Error('无法创建 Live2D 贴图缩放画布')
+    context.drawImage(resource.source, 0, 0, atlas.width, atlas.height)
+    const resized = Texture.from(atlas, { alphaMode, mipmap, scaleMode, wrapMode })
+    model.textures = model.textures.map(entry => entry === texture ? resized : entry)
+    texture.destroy(true)
+  }
+}
+
 function boostClippingMask(model) {
   let retries = 0
   let frame
@@ -41,16 +63,18 @@ export async function createAvatarRenderer(canvas, {
     app.destroy(false, { children: true, texture: true, baseTexture: true })
   }
   try {
+    const gl = app.renderer.gl
     PIXI.live2d.Live2DModel.registerTicker(PIXI.Ticker)
     const model = await PIXI.live2d.Live2DModel.from(`${basePath}/model/大肥鱼.model3.json`, {
       autoInteract: false, autoUpdate: !maxFps, motionPreload: 'NONE',
     })
+    app.stage.addChild(model)
+    fitModelTextures(model, gl, PIXI.Texture)
     if (maxFps) {
       // Use the capped application ticker for both Cubism updates and drawing.
       app.ticker.maxFPS = maxFps
       app.ticker.add(() => model.update(app.ticker.deltaMS))
     }
-    app.stage.addChild(model)
     stopMaskCheck = boostClippingMask(model)
     const internal = model.internalModel
     const engine = new MotionEngine(internal.coreModel, profile, onAction)
@@ -66,7 +90,6 @@ export async function createAvatarRenderer(canvas, {
     }
     // Cubism restores saved parameters after rendering.
     if (onMouth) internal.on('beforeModelUpdate', () => onMouth(internal.coreModel.getParameterValueById('ParamMouthOpenY')))
-    const gl = app.renderer.gl
     const extension = gl.getExtension('WEBGL_debug_renderer_info')
     const renderer = String(gl.getParameter(extension ? extension.UNMASKED_RENDERER_WEBGL : gl.RENDERER)).slice(0, 160)
     const parameterCount = typeof internal.coreModel.getParameterCount === 'function' ? internal.coreModel.getParameterCount() : undefined

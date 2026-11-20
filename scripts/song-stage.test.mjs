@@ -10,6 +10,7 @@ import { registerAvatarHttp } from '../src/host/avatar-http.ts'
 import { registerHttp } from '../src/host/http.ts'
 import { RealtimeVoiceService } from '../src/host/realtime-voice.ts'
 import { SingingService } from '../src/host/singing.ts'
+import { normalizeSongPeak } from '../src/host/song-mix.ts'
 import { SONG_VOCAL_ENVELOPE_HEADER } from '../src/protocol/singing.ts'
 
 const STAGE = '11111111-1111-4111-8111-111111111111'
@@ -121,7 +122,7 @@ test('archived songs play through the exact ready stage and require complete WAV
   const audio = await call(path, { headers })
   assert.equal(audio.headers.get('content-type'), 'audio/wav')
   assert.equal(audio.headers.get(SONG_VOCAL_ENVELOPE_HEADER), null)
-  assert.deepEqual(Buffer.from(await audio.arrayBuffer()), bytes)
+  assert.ok(Buffer.from(await audio.arrayBuffer()).equals(normalizeSongPeak(bytes)))
   assert.equal((await post('/realtime/receipt', receipt)).status, 200)
   assert.equal(store.taskById(session.taskId).status, 'running')
   assert.equal(voice.homeSinging(now), true)

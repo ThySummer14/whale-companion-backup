@@ -1,22 +1,27 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { join } from 'node:path'
+import { createServer } from 'node:http'
+import { join, resolve } from 'node:path'
 import { setImmediate } from 'node:timers/promises'
 import test from 'node:test'
 import { DAILY_AUTONOMY_CONTEXT, DAILY_VISIT_CONTEXT, MINECRAFT_SHARE_CONTEXT, MINECRAFT_SUPPLY_CONTEXT } from '../src/core/model.ts'
 import { MINECRAFT_HOUSE_CAPABILITY, MINECRAFT_HOUSE_EVENT, minecraftHouseBuildSummary } from '../src/core/minecraft-house-repository.ts'
+import { HOUSE_PROJECT_VERIFICATION_EVENT, MinecraftHouseProjectInput } from '../src/core/minecraft-house-project.ts'
 import { CAMP_VISIT_BUILD_TASK_PREFIX, CAMP_VISIT_REVISIT_TASK_PREFIX } from '../src/core/minecraft-supply.ts'
 import { createSurveyWindow } from '../src/core/minecraft-survey-window.ts'
 import { CompanionStore } from '../src/core/store.ts'
 import { AutonomyService } from '../src/host/autonomy.ts'
-import { verifiedMinecraftMilestone } from '../src/host/minecraft-milestones.ts'
+import { registerDeviceHttp } from '../src/host/device-http.ts'
+import { DeviceService } from '../src/host/devices.ts'
+import { verifiedMinecraftHouseProjectShare, verifiedMinecraftMilestone } from '../src/host/minecraft-milestones.ts'
 import { verifiedMinecraftSurveyMoment } from '../src/host/minecraft-moments.ts'
+import { CompanionRuntime } from '../src/host/runtime.ts'
 import { restrictCompanionTools } from '../src/host/tool-policy.ts'
 
-function setup(t, image) {
+function setup(t, image, { paired = false } = {}) {
   mkdirSync('.work', { recursive: true })
-  const directory = mkdtempSync('.work/minecraft-share-test-')
+  const directory = mkdtempSync(resolve('.work', 'minecraft-share-test-'))
   const store = new CompanionStore(join(directory, 'companion.db'))
   const sent = []
   const created = []
@@ -34,14 +39,52 @@ function setup(t, image) {
     },
     async cancel(contextId) { cancelled.push(contextId) },
   }
-  const publish = input => store.feed.create(input)
-  const service = new AutonomyService(store, sessions, undefined, undefined, publish, undefined,
-    image && ((input, receipt, assertReady) => image(store, input, receipt, assertReady)))
+  const routes = new Map()
+  let origin
+  const ctx = { agents: { roots: () => [], get: () => undefined }, webServer: {
+    getOrigin: () => origin,
+    register: route => { routes.set(route.path, route.handler); return () => routes.delete(route.path) },
+  } }
+  const tts = { provider: 'piper', pythonPath: '/unavailable/python', modelPath: '/unavailable/model',
+    mediaDir: join(directory, 'media'), timeoutMs: 5000 }
+  let runtime
+  let service
   t.after(async () => {
-    await service.close()
-    store.close()
-    rmSync(directory, { recursive: true, force: true })
+    try {
+      if (runtime) await runtime.close()
+      else {
+        await service?.close()
+        store.close()
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }) }
   })
+  runtime = paired && new CompanionRuntime(ctx, store, 'fixture', tts, directory, directory, directory, directory, 'owner')
+  if (runtime) Object.assign(runtime.sessions, sessions)
+  const publish = input => runtime ? runtime.publishPost(input) : store.feed.create(input)
+  service = runtime ? runtime.autonomy : new AutonomyService(store, sessions, undefined, undefined, publish, undefined,
+    image && ((input, receipt, assertReady) => image(store, input, receipt, assertReady)))
+  async function pairPhone() {
+    assert.ok(runtime)
+    const devices = new DeviceService(ctx, store)
+    const dispose = registerDeviceHttp(ctx, runtime, devices)
+    const server = createServer(routes.get('/companion-device/api'))
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+    origin = `http://127.0.0.1:${server.address().port}`
+    t.after(async () => {
+      await new Promise(resolve => { server.close(resolve); server.closeAllConnections() })
+      dispose()
+      devices.close()
+    })
+    const base = origin + '/companion-device/api/'
+    const response = await fetch(base + 'pair', { method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ p: devices.createOffer({ routes: [origin] }).link }) })
+    assert.equal(response.status, 201)
+    const { credential: authorization } = await response.json()
+    return (path, data) => fetch(base + path, {
+      headers: { authorization, ...(data && { 'content-type': 'application/json' }) },
+      ...(data && { method: 'POST', body: JSON.stringify(data) }),
+    })
+  }
   function moment(kind = 'dig', summary = '采集并拾取了自然生长的橡木原木，背包增加了 1 根。') {
     const task = store.createTask({ contextId: 'game.minecraft', capabilityId: `minecraft.${kind}`, title: 'Minecraft test' })
     store.transitionTask(task.id, 'running')
@@ -66,19 +109,20 @@ function setup(t, image) {
     await setImmediate()
   }
   async function respond(result, id = sent.at(-1).receipt.messageId) {
-    const binding = store.bindingByContext(MINECRAFT_SHARE_CONTEXT)
+    const binding = store.bindingByContext(sent.at(-1).receipt.contextId)
+    const before = store.feed.list().items.length
     service.observe(binding, { type: 'turn/start', data: { turn: 1 }, seq: 1 })
     service.observe(binding, { type: 'user/message', surfaceOp: 'append', data: { id, source: { kind: 'user' } }, seq: 2 })
     service.observe(binding, {
       type: 'assistant/message', surfaceOp: 'append',
       data: { turn: 1, message: { content: [{ type: 'text', text: JSON.stringify(result) }] } }, seq: 3,
     })
-    assert.equal(store.feed.list().items.length, 0)
+    assert.equal(store.feed.list().items.length, before)
     service.observe(binding, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } }, seq: 4 })
     await setImmediate()
   }
   const enable = extra => service.updateSettings({ feedEnabled: true, minecraftShareEnabled: true, quietStart: '00:00', quietEnd: '00:00', ...extra })
-  return { store, sessions, publish, service, sent, created, cancelled, moment, survey, due, respond, enable }
+  return { store, sessions, publish, service, runtime, pairPhone, sent, created, cancelled, moment, survey, due, respond, enable }
 }
 
 const shareMoment = source => ({ kind: source.experience.kind, taskId: source.experience.taskId, summary: source.fact })
@@ -100,6 +144,37 @@ function builtHouse(store) {
     kind: MINECRAFT_HOUSE_EVENT, taskId: task.id, summary: minecraftHouseBuildSummary(receipt), status: 'success' })
   return { zone, draft, moment: shareMoment(verifiedMinecraftMilestone(store, 'house', task.id)),
     privateValues: [name, assumptions, reference.attachmentId, reference.messageId, zone.name, zone.id, String(zone.x), draft.id, task.id, task.sessionId] }
+}
+
+async function builtHouseProject(h) {
+  const { store, runtime: { minecraft } } = h
+  const zone = store.createBuildZone({ name: '机密工程用地', dimension: 'minecraft:overworld', x: 271, y: 80, z: -36, radius: 8 })
+  const name = '机密跨日茶肆'
+  const layout = { width: 5, height: 4, depth: 5, blocks: 'o'.repeat(60) + '.'.repeat(40) }
+  const sectionNames = ['机密第一段', '机密第二段']
+  let unmatchedSections = []
+  minecraft.request = async path => {
+    switch (path) {
+      case '': return { online: true, capabilities: { houseBuilding: true, houseProjects: true }, auth: { mode: 'cbi' } }
+      case '/house/preview': return { ready: true, checked: 100 }
+      case '/house/build': return { built: true, zoneId: zone.id, checked: 100, placed: 60, consumed: { oak_planks: 60 } }
+      case '/house/project-verify': return { matched: !unmatchedSections.length, checked: 200, unmatchedSections }
+      default: throw new Error('Unexpected Minecraft request: ' + path)
+    }
+  }
+  const project = minecraft.createHouseProject(MinecraftHouseProjectInput.parse({ name, zoneId: zone.id,
+    sections: [-2, 3].map((x, index) => ({ name: sectionNames[index], offset: { x, y: 0, z: 0 }, layout })),
+  }))
+  for (const index of [0, 1]) {
+    const preview = await minecraft.previewHouseProjectSection(project.id, index, new AbortController().signal)
+    await minecraft.buildHouseProjectSection(project.id, index, preview.previewId)
+  }
+  async function verify(unmatched = []) {
+    unmatchedSections = unmatched
+    await minecraft.verifyHouseProject(project.id)
+    return store.activities().find(item => item.kind === HOUSE_PROJECT_VERIFICATION_EVENT && item.data.projectId === project.id)
+  }
+  return { project, verify, zone, privateValues: [name, ...sectionNames, zone.name, zone.id, String(zone.x), project.id] }
 }
 
 function completedCampProject(t, store) {
@@ -415,6 +490,86 @@ test('the same private share route accepts a fully verified offline camp project
   assert.equal(h.store.autonomy.get(job.id).task.status, 'succeeded')
   assert.ok(h.store.memory.list({ contextId: 'chat.mobile', status: 'active' }).some(memory =>
     memory.sourceRefs.some(ref => ref.contextId === DAILY_AUTONOMY_CONTEXT && ref.taskId === revisit.daily.id)))
+})
+
+test('a whole-building receipt can become one private post and a paired phone can continue the thread', async t => {
+  const h = setup(t, undefined, { paired: true })
+  const { project, verify, privateValues } = await builtHouseProject(h)
+  h.enable({ minecraftMilestonesEnabled: true, memoryReview: false, feedRepliesEnabled: true })
+  await h.service.tick()
+  assert.equal(h.store.autonomy.pending('minecraft.share', MINECRAFT_SHARE_CONTEXT), undefined)
+
+  h.enable({ minecraftMilestonesEnabled: false })
+  const activity = await verify()
+  assert.equal(activity.status, 'success')
+  await h.service.tick()
+  assert.equal(h.store.autonomy.pending('minecraft.share', MINECRAFT_SHARE_CONTEXT), undefined)
+  h.enable({ minecraftMilestonesEnabled: true })
+  await h.service.tick()
+  const job = h.store.autonomy.pending('minecraft.share', MINECRAFT_SHARE_CONTEXT)
+  assert.equal(job.dedupeKey, `house-project:${project.id}`)
+  assert.equal(job.payload.taskId, activity.taskId)
+  await h.due(job)
+  const { prompt } = h.sent.at(-1)
+  assert.match(prompt, /整栋验收核对了 2 个分区的 200 处/u)
+  assert.doesNotMatch(prompt, /"image"/u)
+  for (const value of [...privateValues, activity.taskId]) assert.ok(!prompt.includes(value), value)
+  await h.respond({ decision: 'publish', reflection: '我终于能安心看看整栋了。' })
+
+  const phone = await h.pairPhone()
+  const [post] = (await (await phone('feed')).json()).items
+  assert.match(post.body, /2 个分区的 200 处方块和留空。/u)
+  assert.ok(post.body.endsWith('我终于能安心看看整栋了。'))
+  assert.equal(post.author, 'companion')
+  assert.equal(post.mediaId, undefined)
+  assert.equal(post.contextId, MINECRAFT_SHARE_CONTEXT)
+  for (const key of ['sourceTaskId', 'sourceSessionId', 'projectId']) assert.equal(Object.hasOwn(post, key), false)
+  for (const value of privateValues) assert.ok(!post.body.includes(value), value)
+  assert.equal(h.store.feed.bySourceTask(activity.taskId).id, post.id)
+  assert.ok(h.store.memory.list({ contextId: 'chat.mobile', status: 'active' }).some(memory =>
+    memory.kind === 'event' && memory.sourceRefs.some(ref => ref.taskId === activity.taskId)))
+
+  const comment = await phone(`feed/${post.id}/replies`, { body: '整栋一共核对了多少处？' })
+  assert.equal(comment.status, 201)
+  const replyContext = `feed.reply.${post.id}`
+  const decision = h.store.autonomy.pending('feed.reply', replyContext)
+  await h.due(decision)
+  assert.equal(h.sent.at(-1).receipt.contextId, replyContext)
+  assert.notEqual(h.sent.at(-1).receipt.sessionId, h.store.bindingByContext(MINECRAFT_SHARE_CONTEXT).sessionId)
+  assert.match(h.sent.at(-1).prompt, /整栋一共核对了多少处？/u)
+  assert.match(h.sent.at(-1).prompt, /200 处方块和留空/u)
+  await h.respond({ decision: 'reply', body: '两个分区合计核对了两百处，方块和留空都算进去了。' })
+  const thread = await (await phone(`feed/${post.id}`)).json()
+  assert.deepEqual(thread.replies.map(({ author }) => author), ['user', 'companion'])
+
+  const repeated = await verify()
+  assert.notEqual(repeated.taskId, activity.taskId)
+  const candidate = verifiedMinecraftHouseProjectShare(h.store, repeated.taskId)
+  assert.ok(candidate)
+  assert.equal(h.service.enqueueMinecraftShare(candidate.moment), undefined)
+  assert.equal(h.store.feed.bySourceTask(repeated.taskId), undefined)
+})
+
+test('a newer mismatch blocks an active whole-building share at both decision and storage', async t => {
+  const h = setup(t, undefined, { paired: true })
+  const { verify } = await builtHouseProject(h)
+  const { taskId } = await verify()
+  const { moment } = verifiedMinecraftHouseProjectShare(h.store, taskId)
+  h.enable({ minecraftMilestonesEnabled: true })
+  const job = h.service.enqueueMinecraftShare(moment)
+  await h.due(job)
+  await verify()
+  assert.ok(verifiedMinecraftHouseProjectShare(h.store, taskId))
+  const mismatch = await verify([1])
+  assert.equal(mismatch.status, 'warning')
+  assert.equal(verifiedMinecraftHouseProjectShare(h.store, taskId), undefined)
+  assert.equal(verifiedMinecraftHouseProjectShare(h.store, mismatch.taskId), undefined)
+  assert.throws(() => h.publish({ body: `${moment.summary}我感到很踏实。`,
+    author: 'companion', contextId: MINECRAFT_SHARE_CONTEXT, sourceTaskId: taskId,
+    sourceSessionId: h.store.bindingByContext(MINECRAFT_SHARE_CONTEXT).sessionId }), /milestone share source job/u)
+  await h.respond({ decision: 'publish', reflection: '我感到很踏实。' })
+  assert.equal(h.store.autonomy.get(job.id).task.status, 'cancelled')
+  assert.equal(h.store.feed.bySourceTask(taskId), undefined)
 })
 
 test('turning milestones off consumes accepted and active candidates, including replies arriving after re-enabling', async t => {

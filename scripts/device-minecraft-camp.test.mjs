@@ -73,6 +73,57 @@ function projectWindow(store) {
   return { zoneId: zone.id, start: '12:00', end: '12:45', days: 1, allowMinecraftLogin: true, allowMinecraftSupply: true, allowMinecraftBuild: true }
 }
 
+test('paired building progress reads saved verification and pages sections without blueprints or write access', async t => {
+  const h = await setup(t, { real: true })
+  const { id: zoneId } = h.store.createBuildZone({ name: '河边授权区', x: 1, y: 80, z: 1, radius: 40, dimension: 'minecraft:overworld' })
+  const repo = h.store.minecraftHouseProjects
+  const project = repo.create({ name: '河边茶肆', zoneId, sections: Array.from({ length: 34 }, (_, index) => ({
+    name: `围墙 ${index + 1}`, offset: { x: index, y: 0, z: 0 },
+    layout: { width: 1, height: 5, depth: 1, blocks: 'ooooo' },
+  })) })
+  const firstTask = h.store.createTask({ capabilityId: 'minecraft.house-project.section', contextId: 'game.minecraft', title: '第一段' })
+  const secondTask = h.store.createTask({ capabilityId: 'minecraft.house-project.section', contextId: 'game.minecraft', title: '第二段' })
+  assert.ok(repo.start(project.id, 0, firstTask.id))
+  assert.ok(repo.finish(project.id, 0, firstTask.id, {
+    receipt: { built: true, zoneId, placed: 1, checked: 5, consumed: { oak_planks: 1 } },
+  }))
+  assert.ok(repo.start(project.id, 1, secondTask.id))
+  assert.ok(repo.finish(project.id, 1, secondTask.id, { reason: 'homebuild-retreat-unconfirmed' }))
+  const checkedAt = '2026-11-17T00:00:00.000Z'
+  repo.verify(project.id, { matched: false, checked: 170, unmatchedSections: [1, 2], checkedAt })
+  const path = `/companion-device/api/minecraft/house-projects/${project.id}/sections`
+
+  const view = await (await h.get(state, h.phone)).json()
+  assert.ok(!view.activities.some(activity => activity.kind.startsWith('world.house-project-')))
+  assert.deepEqual(view.houseProjectProgress, { version: 1, items: [{ id: project.id, name: '河边茶肆',
+    totalSections: 34, verifiedSections: 1, runningSections: 0, interruptedSections: 1,
+    lastVerification: { matched: false, checked: 170, unmatchedSections: 2, checkedAt },
+  }] })
+  assert.equal((await h.get(path, {})).status, 401)
+  assert.equal((await h.write(path, {}, h.phone)).status, 404)
+  for (const query of ['?after=0&after=1', '?limit=1', '?after=00', '?after=1%0A', '?after=9007199254740992']) {
+    assert.equal((await h.get(path + query, h.phone)).status, 400, query)
+  }
+  const first = await (await h.get(path, h.phone)).json()
+  assert.equal(first.version, 1)
+  assert.equal(first.items.length, 32)
+  assert.equal(first.nextAfter, 31)
+  assert.deepEqual(first.items.slice(0, 3), [
+    { index: 0, name: '围墙 1', status: 'built', checked: 5, placed: 1 },
+    { index: 1, name: '围墙 2', status: 'interrupted' },
+    { index: 2, name: '围墙 3', status: 'pending' },
+  ])
+  assert.ok(!JSON.stringify(first).includes(zoneId))
+  const next = await (await h.get(path + '?after=31', h.phone)).json()
+  assert.deepEqual(next.items.map(item => item.index), [32, 33])
+  assert.equal(next.nextAfter, undefined)
+  assert.deepEqual(await (await h.get(path + '?after=33', h.phone)).json(), { version: 1, items: [] })
+
+  assert.equal(h.store.revokeBuildZone(zoneId), true)
+  assert.equal((await h.get(path, h.phone)).status, 404)
+  assert.deepEqual((await (await h.get(state, h.phone)).json()).houseProjectProgress.items, [])
+})
+
 test('camp station pairs read access with local-only permission and resume', async t => {
   const h = await setup(t)
   assert.equal((await h.get(camp, {})).status, 401)

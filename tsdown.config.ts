@@ -2,7 +2,7 @@ import { defineConfig } from 'tsdown'
 
 export default defineConfig([
   {
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', 'dsh-litematica': 'scripts/dsh-litematica.ts' },
     outDir: 'lib',
     format: 'esm',
     fixedExtension: false,

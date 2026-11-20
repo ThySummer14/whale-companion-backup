@@ -123,7 +123,7 @@ export function registerMinecraftTools(ctx: Context, runtime: CompanionRuntime):
     })),
     ctx.tools.register(defineTool({
       name: 'mc_sleep',
-      description: 'Use one nearby visible Overworld bed through normal survival interaction. Returns whether you actually started sleeping.',
+      description: 'Right-click one reachable Overworld bed in survival. A verified bed respawn point in daylight returns spawnSet, and actually lying down at night returns sleeping.',
       parameters: {
         x: { type: 'integer', required: true }, y: { type: 'integer', required: true }, z: { type: 'integer', required: true },
       }, output,

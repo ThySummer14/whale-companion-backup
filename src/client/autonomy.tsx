@@ -146,8 +146,8 @@ export function AutonomyPage({ data, reload, notify }: { data: WorkbenchView; re
           <label className="cp-row"><input type="checkbox" checked={draft.minecraftMilestonesEnabled} disabled={busy} onChange={event => {
             const patch = { minecraftMilestonesEnabled: event.target.checked }
             void save({ ...draft, ...patch }, patch)
-          }} />允许已验收的营地项目和小屋作为自主经历来源（默认关闭）</label>
-          <span className="cp-hint cp-small">写自我笔记仍需开启自主经历复盘。发布动态仍需开启自主动态与 Minecraft 经历分享。</span>
+          }} />允许已验收的 Minecraft 成果作为自主经历来源（默认关闭）</label>
+          <span className="cp-hint cp-small">自我笔记需开启经历复盘。营地、小屋和整栋工程的私有动态需开启自主动态与 Minecraft 经历分享。</span>
         </div>}
         {typeof draft.minecraftRecoveryEnabled === 'boolean' && <div className="cp-field">
           <label className="cp-row"><input type="checkbox" checked={draft.minecraftRecoveryEnabled}

@@ -57,4 +57,5 @@ export interface DeviceSingingTrack {
 export interface DeviceSingingArchive {
   version: 1
   items: DeviceSingingTrack[]
+  nextCursor?: string
 }

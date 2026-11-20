@@ -10,7 +10,7 @@ import { MinecraftRecoveryOutcome } from './minecraft-recovery.tsx'
 const HOUSE_STATUS: Record<MinecraftHouseDraft['status'], string> = {
   draft: '待预检', running: '施工中', built: '已验收', interrupted: '已中断，可重新预检',
 }
-export const HOUSE_BLOCK_LABELS = {
+export const HOUSE_BLOCK_LABELS: any = new Proxy({
   air: { name: '留空', mark: '·' },
   oak_planks: { name: '橡木木板', mark: '橡' },
   spruce_planks: { name: '云杉木板', mark: '杉' },
@@ -22,7 +22,12 @@ export const HOUSE_BLOCK_LABELS = {
   dark_oak_planks: { name: '深色橡木木板', mark: '深' },
   lantern: { name: '灯笼', mark: '灯' },
   cherry_leaves: { name: '樱花树叶', mark: '叶' },
-}
+}, {
+  get(target: Record<string, { name: string; mark: string }>, property: string) {
+    const base = property.split('[', 1)[0]!
+    return target[property] ?? target[base] ?? { name: base.replaceAll('_', ' '), mark: base.slice(0, 1) }
+  },
+})
 const SITE_REASONS: Readonly<Record<string, string>> = {
   'homebuild-materials': '背包里的施工材料不足。',
   'homebuild-obstructed': '现场有方块占用了蓝图位置。',

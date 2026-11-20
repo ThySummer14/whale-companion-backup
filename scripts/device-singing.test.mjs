@@ -10,6 +10,7 @@ import { DeviceService } from '../src/host/devices.ts'
 import { DevicePlaybackService } from '../src/host/device-playback.ts'
 import { CompanionRuntime } from '../src/host/runtime.ts'
 import { SingingService } from '../src/host/singing.ts'
+import { normalizeSongPeak } from '../src/host/song-mix.ts'
 import { MAX_SINGING_MIDI_BYTES } from '../src/protocol/singing-midi.ts'
 import { MAX_CHAT_ATTACHMENT_BYTES } from '../src/host/chat-attachments.ts'
 
@@ -132,11 +133,12 @@ test('paired devices list only archived songs and read the exact WAV with bounde
   assert.equal(whole.headers.get('x-companion-playback-id'), null)
   assert.equal(whole.headers.get('content-type'), 'audio/wav')
   assert.equal(whole.headers.get('cache-control'), 'private, no-store')
-  assert.deepEqual(Buffer.from(await whole.arrayBuffer()), h.wav)
+  const archived = normalizeSongPeak(h.wav)
+  assert.ok(Buffer.from(await whole.arrayBuffer()).equals(archived))
   const partial = await h.request(audioPath, { headers: { range: 'bytes=40-49' } })
   assert.equal(partial.status, 206)
   assert.equal(partial.headers.get('content-range'), `bytes 40-49/${h.wav.length}`)
-  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), h.wav.subarray(40, 50))
+  assert.deepEqual(Buffer.from(await partial.arrayBuffer()), archived.subarray(40, 50))
   const head = await h.request(audioPath, { method: 'HEAD' })
   assert.equal(head.status, 200)
   assert.equal(head.headers.get('accept-ranges'), 'bytes')

@@ -79,7 +79,7 @@ test('daily house supply offers require separate consent and exact Worker eviden
   h.state.crafting = true
   assert.deepEqual(await h.inspect(true), [{ section: 1, name: '2' }, { section: 0, name: '1', supply: { recipe: 'oak_planks', missing: 4 } }])
   const probes = h.state.calls.filter(call => call.path === '/house/supply-preview')
-  const section = { id: h.zone.id, dimension: h.zone.dimension, x: 110, y: 80, z: 112, radius: 6 }
+  const section = { id: h.zone.id, dimension: h.zone.dimension, x: 110, y: 80, z: 112, radius: 3 }
   assert.deepEqual(probes.map(call => call.input), [
     { zone: section, layout, recipe: 'oak_planks', missing: 4 },
     { zone: section, layout, recipe: 'spruce_planks', missing: 1 },

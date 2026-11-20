@@ -15,9 +15,10 @@ import { MINECRAFT_HOUSE_CAPABILITY, MINECRAFT_HOUSE_EVENT, MINECRAFT_HOUSE_RECO
 import { HOUSE_COMPLETION_TASK_PREFIX } from '../core/minecraft-house-verification.ts'
 import { MinecraftHouseRevisionInput } from '../core/minecraft-house.ts'
 import { DAILY_HOUSE_PROJECT_TASK_PREFIX, HOUSE_PROJECT_SECTION_CAPABILITY, HOUSE_PROJECT_SUPPLY_CAPABILITY, HOUSE_PROJECT_SUPPLY_EVENT,
-  HOUSE_PROJECT_VERIFY_CAPABILITY, MinecraftHouseProjectInput,
-  PROJECT_MAX_SECTIONS } from '../core/minecraft-house-project.ts'
+  HOUSE_PROJECT_VERIFY_CAPABILITY, MinecraftHouseProjectInput } from '../core/minecraft-house-project.ts'
 import { MinecraftHouseProjectImportInput } from '../core/minecraft-house-project-import.ts'
+import { VOXEL_PREPARE_CAPABILITY } from '../core/minecraft-voxel-blueprints.ts'
+import { VOXEL_BUILD_CAPABILITY, VOXEL_BUILD_EVENT } from '../core/minecraft-blueprint-build.ts'
 import { HOUSE_AGENT_RECOVERY_EVENT, HOUSE_AGENT_RECOVERY_PREFIX, HOUSE_CELL_ACTIVITY, HOUSE_CELL_AUDIT_ACTIVITY,
   HOUSE_CELL_AUDIT_PREFIX, HOUSE_CELL_CAPABILITY, HOUSE_CELL_TASK_PREFIX } from '../core/minecraft-recovery.ts'
 import { CAMP_VISIT_BUILD_TASK_PREFIX, CAMP_VISIT_REVISIT_TASK_PREFIX, CAMP_VISIT_SUPPLY_TASK_PREFIX } from '../core/minecraft-supply.ts'
@@ -26,7 +27,7 @@ import { managementAllowed } from './security.ts'
 import { ContextInput, FeedPostInput, FeedReplyInput, MessageInput, SessionCreateInput, SingingInputSchema, TtsRenderInput, identifier } from './api-schemas.ts'
 import { DeviceAuthError } from './devices.ts'
 import { streamAudio } from './audio.ts'
-import { parseBilibiliCollection, parseBilibiliTarget, plainBilibiliText } from '../core/bilibili.ts'
+import { BILIBILI_WATCH_EVENT, parseBilibiliCollection, parseBilibiliTarget, plainBilibiliText } from '../core/bilibili.ts'
 import { MAX_BILIBILI_SUBTITLE_BYTES } from '../protocol/bilibili.ts'
 import { MAX_SINGING_WAV_BYTES } from '../protocol/singing.ts'
 import { validSongGain, type SingingCoverMix } from './song-mix.ts'
@@ -237,6 +238,8 @@ function requireUnmanagedTask(capability: string, contextId?: string): void {
   if (capability === 'media.avatar') throw new RouteError(403, 'Use the dedicated avatar action endpoint', 'avatar-task-managed')
   if (capability === 'minecraft.survey') throw new RouteError(403, 'Survey tasks require a live permit and game receipt', 'minecraft-survey-managed')
   if (capability === MINECRAFT_HOUSE_CAPABILITY) throw new RouteError(403, 'House tasks require an owner-approved blueprint and game receipt', 'minecraft-house-managed')
+  if (capability === VOXEL_PREPARE_CAPABILITY) throw new RouteError(403, 'Blueprint preparation requires a current owner attachment', 'minecraft-blueprint-managed')
+  if (capability === VOXEL_BUILD_CAPABILITY) throw new RouteError(403, 'Blueprint construction requires a reviewed blueprint and live site approval', 'minecraft-blueprint-managed')
   if (capability === HOUSE_PROJECT_SECTION_CAPABILITY || capability === HOUSE_PROJECT_SUPPLY_CAPABILITY || capability === HOUSE_PROJECT_VERIFY_CAPABILITY) {
     throw new RouteError(403, 'Building projects require an owner-approved blueprint and game receipt', 'minecraft-house-project-managed')
   }
@@ -699,11 +702,11 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
           else json(res, 201, runtime.minecraft.createHouseProject(MinecraftHouseProjectInput.parse(await body(req))))
           return
         }
-        const projectSection = /^minecraft\/house-projects\/([0-9a-f-]+)\/sections\/([0-9])\/(preview|build)$/u.exec(path)
+        const projectSection = /^minecraft\/house-projects\/([0-9a-f-]+)\/sections\/([0-9]+)\/(preview|build)$/u.exec(path)
         if (method === 'POST' && projectSection) {
           if (url.searchParams.size) throw new RouteError(400, 'Invalid request', 'invalid-request')
           const id = z.uuid().parse(projectSection[1])
-          const index = z.int().min(0).max(PROJECT_MAX_SECTIONS - 1).parse(Number(projectSection[2]))
+          const index = z.int().min(0).parse(Number(projectSection[2]))
           if (projectSection[3] === 'build') {
             const { previewId } = z.strictObject({ previewId: z.uuid() }).parse(await body(req))
             json(res, 200, await runtime.minecraft.buildHouseProjectSection(id, index, previewId))
@@ -718,6 +721,30 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
               if (!res.destroyed) json(res, 200, result)
             } finally { res.off('close', disconnect) }
           }
+          return
+        }
+        const projectAutoBuild = /^minecraft\/house-projects\/([0-9a-f-]+)\/auto-build$/u.exec(path)
+        if (method === 'POST' && projectAutoBuild) {
+          if (url.searchParams.size) throw new RouteError(400, 'Invalid request', 'invalid-request')
+          const id = z.uuid().parse(projectAutoBuild[1])
+          z.strictObject({}).parse(await body(req))
+          const controller = new AbortController()
+          const disconnect = () => controller.abort()
+          res.once('close', disconnect)
+          if (res.destroyed) disconnect()
+          try {
+            const result = await runtime.minecraft.autoBuildHouseProject(id, controller.signal)
+            if (!res.destroyed) json(res, 200, result)
+          } finally { res.off('close', disconnect) }
+          return
+        }
+        const projectResume = /^minecraft\/house-projects\/([0-9a-f-]+)\/resume$/u.exec(path)
+        if (method === 'POST' && projectResume) {
+          if (url.searchParams.size) throw new RouteError(400, 'Invalid request', 'invalid-request')
+          z.strictObject({}).parse(await body(req))
+          const id = z.uuid().parse(projectResume[1])
+          if (!runtime.autonomy.resumeDailyHouseProject(id)) throw new DeviceAuthError(409, 'daily-house-project-resume-unavailable')
+          json(res, 200, { resumed: true })
           return
         }
         const projectPlace = /^minecraft\/house-projects\/([0-9a-f-]+)\/place$/u.exec(path)
@@ -864,7 +891,7 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
             x: z.number().int().min(-30_000_000).max(30_000_000),
             y: z.number().int().min(-2048).max(2032),
             z: z.number().int().min(-30_000_000).max(30_000_000),
-            radius: z.number().int().min(2).max(8),
+            radius: z.number().int().min(2),
           }).parse(await body(req))
           json(res, 201, runtime.minecraft.createBuildZone(input))
           return
@@ -997,6 +1024,9 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
         }
         if (method === 'POST' && path === 'events') {
           const input = ActivityInput.parse(await body(req))
+          if (input.kind === VOXEL_BUILD_EVENT) {
+            throw new RouteError(403, 'Voxel construction events require a game receipt', 'minecraft-blueprint-build-managed')
+          }
           if (input.kind === 'world.house-project-section' || input.kind === HOUSE_PROJECT_SUPPLY_EVENT || input.kind === 'world.house-project-verification') {
             throw new RouteError(403, 'Building project events require a game receipt', 'minecraft-house-project-managed')
           }
@@ -1025,7 +1055,8 @@ export function registerHttp(ctx: Context, runtime: CompanionRuntime): () => voi
           if (input.source === 'core.autonomy' && input.kind.startsWith('survey-window.')) {
             throw new RouteError(403, 'Survey window events require a local owner authorization', 'minecraft-survey-window-managed')
           }
-          if (input.source === 'media.bilibili' && ['video.inspected', 'video.subtitle-read', 'video.clip-sampled'].includes(input.kind)) {
+          if (input.source === 'media.bilibili' &&
+              ['video.inspected', 'video.subtitle-read', 'video.clip-sampled', 'video.watched', BILIBILI_WATCH_EVENT].includes(input.kind)) {
             throw new RouteError(403, 'Bilibili reading events require a connector receipt', 'bili-read-managed')
           }
           if (input.kind === 'assistant.completed') {

@@ -1,0 +1,222 @@
+--- a/src/main/java/baritone/server/EmergencyAvoidanceController.java
++++ b/src/main/java/baritone/server/EmergencyAvoidanceController.java
+@@ -3,6 +3,10 @@
+ import baritone.Baritone;
+ import baritone.api.utils.Rotation;
+ import baritone.api.utils.RotationUtils;
++import net.minecraft.core.BlockPos;
++import net.minecraft.core.Direction;
++import net.minecraft.server.level.ServerLevel;
++import net.minecraft.tags.FluidTags;
+ import net.minecraft.server.level.ServerPlayer;
+ import net.minecraft.tags.ItemTags;
+ import net.minecraft.world.InteractionHand;
+@@ -13,6 +17,7 @@
+ import net.minecraft.world.entity.projectile.Fireball;
+ import net.minecraft.world.item.ItemStack;
+ import net.minecraft.world.item.Items;
++import net.minecraft.world.level.block.Blocks;
+ import net.minecraft.world.phys.AABB;
+ import net.minecraft.world.phys.Vec3;
+ 
+@@ -21,11 +26,18 @@
+ 
+ /** Immediate input-layer survival reflexes; long-term goals stay outside this controller. */
+ public final class EmergencyAvoidanceController {
++    private static final int[] ESCAPE_ANGLES = {0, 30, -30, 60, -60, 85, -85};
++    private static final int[] FOOTING_LEVELS = {0, 1, -1};
++    private static final int[][] SHORE_DIRECTIONS = {
++            {1, 0}, {-1, 0}, {0, 1}, {0, -1}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}
++    };
+     private final Baritone baritone;
+     private final CarpetInputController input;
+     private Threat activeThreat = Threat.NONE;
+     private boolean shielding;
+     private ShieldHoldTask manualShield;
++    private Vec3 shore;
++    private int nextShoreScan;
+ 
+     public EmergencyAvoidanceController(Baritone baritone) {
+         this.baritone = baritone;
+@@ -34,6 +46,7 @@
+ 
+     public void tick() {
+         ServerPlayer player = baritone.getPlayerContext().player();
++        if (Baritone.settings().emergencyAvoidance.value && recoverAir(player)) return;
+         if (!Baritone.settings().emergencyAvoidance.value && manualShield == null) {
+             tickHostileResponse(player);
+             return;
+@@ -98,12 +111,7 @@
+         }
+         cancelManualShield(null, "shield-emergency");
+         stopShielding(player);
+-        Vec3 direction = escape.normalize();
+-        float yaw = (float) Math.toDegrees(
+-                Math.atan2(-direction.x, direction.z));
+-        boolean jump = Baritone.settings().emergencyAvoidanceJump.value
+-                && (player.horizontalCollision || player.onGround());
+-        input.setEmergencyMovement(new Rotation(yaw, 0.0F), true, jump);
++        steerAway(player, escape, player.horizontalCollision || player.onGround());
+         activeThreat = strongest;
+     }
+ 
+@@ -146,17 +154,10 @@
+                 ? player.getYRot() : (float) Math.toDegrees(
+                 Math.atan2(-horizontal.x, horizontal.z));
+         double horizontalDistance = Math.sqrt(horizontal.lengthSqr());
+-        if (!armed) {
++        if (!armed || player.getHealth() <= 6.0F) {
++            Vec3 away = horizontalAway(player.position(), target.position());
+             if (hasShield(player)) {
+-                Vec3 away = horizontal.lengthSqr() < 0.0001D
+-                        ? new Vec3(1.0D, 0.0D, 0.0D)
+-                        : horizontal.scale(-1.0D).normalize();
+-                float awayYaw = (float) Math.toDegrees(
+-                        Math.atan2(-away.x, away.z));
+-                input.setPriorityMovement(new Rotation(awayYaw, 0.0F),
+-                        true, true,
+-                        Baritone.settings().emergencyAvoidanceJump.value
+-                                && player.horizontalCollision);
++                steerAway(player, away, player.horizontalCollision);
+                 if (horizontalDistance <= 5.0D && startShielding(player)) {
+                     activeThreat = Threat.HOSTILE_SHIELD;
+                 } else {
+@@ -164,19 +165,11 @@
+                 }
+                 return;
+             }
+-            if (!Baritone.settings().combatFleeWithoutWeapon.value) {
++            if (!armed && !Baritone.settings().combatFleeWithoutWeapon.value) {
+                 clear();
+                 return;
+             }
+-            Vec3 away = horizontal.lengthSqr() < 0.0001D
+-                    ? new Vec3(1.0D, 0.0D, 0.0D)
+-                    : horizontal.scale(-1.0D).normalize();
+-            float awayYaw = (float) Math.toDegrees(
+-                    Math.atan2(-away.x, away.z));
+-            input.setPriorityMovement(new Rotation(awayYaw, 0.0F),
+-                    true, true,
+-                    Baritone.settings().emergencyAvoidanceJump.value
+-                            && (player.horizontalCollision || player.onGround()));
++            steerAway(player, away, player.horizontalCollision || player.onGround());
+             activeThreat = Threat.HOSTILE_FLEE;
+             return;
+         }
+@@ -208,9 +201,98 @@
+             player.swing(InteractionHand.MAIN_HAND, true);
+             player.resetAttackStrengthTicker();
+             activeThreat = Threat.HOSTILE_COMBAT;
++        }
++    }
++
++    private void steerAway(ServerPlayer player, Vec3 away, boolean canJump) {
++        Vec3 origin = player.position();
++        ServerLevel level = player.serverLevel();
++        double angle = Math.atan2(away.z, away.x);
++        for (int degrees : ESCAPE_ANGLES) {
++            double heading = angle + Math.toRadians(degrees);
++            double dx = Math.cos(heading);
++            double dz = Math.sin(heading);
++            BlockPos first = BlockPos.containing(origin.x + 0.85D * dx, origin.y, origin.z + 0.85D * dz);
++            BlockPos second = BlockPos.containing(origin.x + 1.7D * dx, origin.y, origin.z + 1.7D * dz);
++            if (!safeColumn(level, first) || !safeColumn(level, second)) continue;
++            float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
++            input.setEmergencyMovement(new Rotation(yaw, 0.0F), true,
++                    Baritone.settings().emergencyAvoidanceJump.value && canJump);
++            return;
++        }
++        input.setPriorityMovement(null, false, false, player.isInWater());
++    }
++
++    private boolean recoverAir(ServerPlayer player) {
++        // A swim jump can momentarily lift the whole player out of the fluid.
++        // Keep control until landing or until the breath has actually recovered.
++        if (!player.isInWater() && (activeThreat != Threat.WATER || player.onGround())) {
++            shore = null;
++            nextShoreScan = 0;
++            return false;
+         }
++        int air = player.getAirSupply();
++        if (air >= 160 && activeThreat != Threat.WATER) return false;
++        boolean submerged = player.isEyeInFluid(FluidTags.WATER);
++        if (!submerged && player.tickCount >= nextShoreScan) {
++            shore = nearbyShore(player.serverLevel(), player.position());
++            nextShoreScan = player.tickCount + 5;
++        }
++        if (!submerged && shore == null && air >= 280) return false;
++        cancelManualShield(null, "shield-emergency");
++        stopShielding(player);
++        Rotation rotation = new Rotation(player.getYRot(), -45.0F);
++        boolean forward = false;
++        if (!submerged && shore != null) {
++            Vec3 direction = shore.subtract(player.position());
++            rotation = new Rotation((float) Math.toDegrees(Math.atan2(-direction.x, direction.z)), 0.0F);
++            forward = true;
++        }
++        input.setPriorityMovement(rotation, forward, forward, true);
++        activeThreat = Threat.WATER;
++        return true;
+     }
+ 
++    private static Vec3 nearbyShore(ServerLevel level, Vec3 origin) {
++        for (int distance = 1; distance <= 5; distance++) {
++            for (int[] direction : SHORE_DIRECTIONS) {
++                BlockPos end = BlockPos.containing(origin.x + distance * direction[0], origin.y,
++                        origin.z + distance * direction[1]);
++                if (!safeColumn(level, end)) continue;
++                boolean clear = true;
++                for (int step = 1; step < distance && clear; step++) {
++                    BlockPos feet = BlockPos.containing(origin.x + step * direction[0], origin.y,
++                            origin.z + step * direction[1]);
++                    clear = level.hasChunkAt(feet) && level.getBlockState(feet).getCollisionShape(level, feet).isEmpty()
++                            && level.getBlockState(feet.above()).getCollisionShape(level, feet.above()).isEmpty();
++                }
++                if (clear) return Vec3.atCenterOf(end);
++            }
++        }
++        return null;
++    }
++
++    private static boolean safeColumn(ServerLevel level, BlockPos column) {
++        if (!level.hasChunkAt(column)) return false;
++        for (int height : FOOTING_LEVELS) {
++            BlockPos feet = column.above(height);
++            BlockPos head = feet.above();
++            BlockPos floor = feet.below();
++            var support = level.getBlockState(floor);
++            if (support.is(Blocks.MAGMA_BLOCK) || !support.getFluidState().isEmpty()
++                    || !support.isFaceSturdy(level, floor, Direction.UP)) continue;
++            if (clearDryCell(level, feet) && clearDryCell(level, head)) return true;
++        }
++        return false;
++    }
++
++    private static boolean clearDryCell(ServerLevel level, BlockPos pos) {
++        var state = level.getBlockState(pos);
++        return state.getFluidState().isEmpty() && state.getCollisionShape(level, pos).isEmpty()
++                && !state.is(Blocks.FIRE) && !state.is(Blocks.SOUL_FIRE)
++                && !state.is(Blocks.POWDER_SNOW) && !state.is(Blocks.SWEET_BERRY_BUSH);
++    }
++
+     private boolean tickIncomingFireball(ServerPlayer player, double detection) {
+         Vec3 origin = player.position();
+         Fireball fireball = player.level().getEntitiesOfClass(
+@@ -336,7 +418,7 @@
+             ShieldHoldTask.reject(nonce, "shield-busy", feedback);
+             return;
+         }
+-        if (activeThreat == Threat.TNT || activeThreat == Threat.CREEPER) {
++        if (activeThreat == Threat.TNT || activeThreat == Threat.CREEPER || activeThreat == Threat.WATER) {
+             ShieldHoldTask.reject(nonce, "shield-emergency", feedback);
+             return;
+         }
+@@ -387,7 +469,7 @@
+     }
+ 
+     public enum Threat {
+-        NONE, TNT, CREEPER, FIREBALL,
++        NONE, TNT, CREEPER, FIREBALL, WATER,
+         HOSTILE_COMBAT, HOSTILE_FLEE, HOSTILE_SHIELD
+     }
+ }

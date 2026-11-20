@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { MINECRAFT_HOUSE_BLOCKS, minecraftHouseCells, minecraftHouseMaterials, type MinecraftHouseLayout } from '../core/minecraft-house.ts'
-import { MinecraftHouseProjectInput, PROJECT_MAX_SECTIONS, PROJECT_MIN_SECTIONS, PROJECT_SECTION_OFFSET_LIMIT,
-  type MinecraftHouseProject, type MinecraftHouseProjectSitePreview, type MinecraftHouseProjectsView } from '../core/minecraft-house-project.ts'
+import { MinecraftHouseProjectInput, type MinecraftHouseProject, type MinecraftHouseProjectSitePreview, type MinecraftHouseProjectsView } from '../core/minecraft-house-project.ts'
 import { MinecraftHouseProjectImportInput, type MinecraftHouseProjectImportPreview } from '../core/minecraft-house-project-import.ts'
 import type { MinecraftView } from '../protocol/api.ts'
 import { buildMinecraftHouseProjectSection, createMinecraftHouseProject, getMinecraftHouseProjects,
@@ -484,8 +483,8 @@ export function MinecraftHouseProjects({ zones, busy }: { zones: MinecraftView['
         </label>
         <p className="cp-hint" id="cp-house-project-format-hint">
           {blueprintFormat === 'whole'
-            ? <>填写宽 <code>width</code>、深 <code>depth</code>、高 <code>height</code> 和方块串 <code>blocks</code>。整栋最多 750 格，含 101～600 个实体方块。占地水平居中，底层与授权区中心同高。四合院示例建议选择半径 8 格的授权区。</>
-            : <>共 {PROJECT_MIN_SECTIONS}～{PROJECT_MAX_SECTIONS} 段。相对中心偏移为 ±{PROJECT_SECTION_OFFSET_LIMIT} 格以内，x、z 表示该段中心，y 表示该段底层。两室示例建议选择半径 8 格的授权区。</>}
+            ? <>填写宽 <code>width</code>、深 <code>depth</code>、高 <code>height</code> 和方块串 <code>blocks</code>。尺寸由设计决定，占地水平居中，底层与授权区中心同高。</>
+            : <>可分段施工，分段只用于执行与验收，不限制工程大小。x、z 表示该段中心，y 表示该段底层。</>}
           {' '}方块从底层开始，每层从北到南，行内从西到东。<code>.</code> 留空，<code>o</code> 橡木，<code>s</code> 云杉，<code>c</code> 圆石，<code>g</code> 玻璃。
         </p>
         <div className="cp-row">

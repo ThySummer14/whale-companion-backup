@@ -1,6 +1,6 @@
 import { HOME_JOURNAL_REVISION_MS, type HomeVideoReceipt, type HomeView } from '../protocol/api.ts'
 import { MAX_BILIBILI_CLIP_SECONDS } from '../protocol/bilibili.ts'
-import { parseBilibiliTarget } from './bilibili.ts'
+import { bilibiliWatchReceipt, parseBilibiliTarget } from './bilibili.ts'
 import { BILIBILI_AUTONOMY_CONTEXT, BILIBILI_CLIP_CONTEXT, BILIBILI_CONTEXT, type ActivityRecord, type Presence, type SessionBinding } from './model.ts'
 
 type HomeRecent = HomeView['recent'][number]
@@ -108,11 +108,13 @@ export function projectHome(input: HomeActivityInput & { now: Date; activities: 
 
   const recent: HomeView['recent'] = []
   for (const record of activities) {
-    const kind = recentKind(record, chats, browseSession, autonomousBrowseSession)
+    const watch = bilibiliWatchReceipt(record)
+    const kind = watch ? 'video' : recentKind(record, chats, browseSession, autonomousBrowseSession)
     if (!kind) continue
     const time = Date.parse(record.occurredAt)
     if (!Number.isFinite(time)) continue
-    recent.push({ kind, at: new Date(time).toISOString(), ...(kind === 'video' && { video: videoReceipt(record) }) })
+    recent.push({ kind, at: new Date(time).toISOString(),
+      ...(kind === 'video' && { video: watch ? { mode: 'clip', source: watch.source } : videoReceipt(record) }) })
     if (recent.length === 4) break
   }
   return { ...projectHomeStatus(input), recent }

@@ -14,28 +14,57 @@ export const MINECRAFT_HOUSE_BLOCKS = {
   d: 'dark_oak_planks',
   l: 'lantern',
   e: 'cherry_leaves',
+  A: 'magenta_terracotta',
+  B: 'stripped_birch_log[axis=y]',
+  C: 'stripped_birch_log[axis=x]',
+  D: 'stripped_birch_log[axis=z]',
+  E: 'stripped_oak_log[axis=y]',
+  F: 'stripped_oak_log[axis=x]',
+  G: 'stripped_oak_log[axis=z]',
+  H: 'birch_planks',
+  I: 'bricks',
+  J: 'oak_stairs[facing=east,half=bottom]',
+  f: 'oak_stairs[facing=west,half=bottom]',
+  K: 'brick_stairs[facing=south,half=bottom]',
+  L: 'brick_stairs[facing=north,half=bottom]',
+  M: 'brick_stairs[facing=east,half=bottom]',
+  N: 'brick_stairs[facing=west,half=bottom]',
+  O: 'oak_trapdoor[half=top]',
+  P: 'jungle_trapdoor[half=top]',
+  Q: 'spruce_fence',
+  R: 'glass_pane',
+  S: 'lantern[hanging=true]',
+  T: 'flowering_azalea_leaves[persistent=true]',
+  U: 'azalea_leaves[persistent=true]',
+  V: 'pink_wool',
+  W: 'white_wool',
+  X: 'barrel',
+  Y: 'bookshelf',
+  Z: 'smoker',
 } as const
 
 export type MinecraftHouseSymbol = keyof typeof MINECRAFT_HOUSE_BLOCKS
-export type MinecraftHouseMaterial = (typeof MINECRAFT_HOUSE_BLOCKS)[Exclude<MinecraftHouseSymbol, '.'>]
-const Material = z.enum(Object.values(MINECRAFT_HOUSE_BLOCKS).filter((block): block is MinecraftHouseMaterial => block !== 'air'))
-export const MINECRAFT_HOUSE_MAX_SIDE = 64
-export const MINECRAFT_HOUSE_MAX_BLOCKS = 20000
+export type MinecraftHouseMaterial = 'oak_planks' | 'spruce_planks' | 'cobblestone' | 'glass' | 'cherry_planks' | 'pink_concrete' |
+  'smooth_sandstone' | 'dark_oak_planks' | 'lantern' | 'cherry_leaves' | 'magenta_terracotta' | 'stripped_birch_log' | 'stripped_oak_log' |
+  'birch_planks' | 'bricks' | 'oak_stairs' | 'brick_stairs' | 'oak_trapdoor' | 'jungle_trapdoor' | 'spruce_fence' | 'glass_pane' |
+  'flowering_azalea_leaves' | 'azalea_leaves' | 'pink_wool' | 'white_wool' | 'barrel' | 'bookshelf' | 'smoker'
+const Material = z.enum(['oak_planks', 'spruce_planks', 'cobblestone', 'glass', 'cherry_planks', 'pink_concrete', 'smooth_sandstone',
+  'dark_oak_planks', 'lantern', 'cherry_leaves', 'magenta_terracotta', 'stripped_birch_log', 'stripped_oak_log', 'birch_planks', 'bricks',
+  'oak_stairs', 'brick_stairs', 'oak_trapdoor', 'jungle_trapdoor', 'spruce_fence', 'glass_pane', 'flowering_azalea_leaves', 'azalea_leaves',
+  'pink_wool', 'white_wool', 'barrel', 'bookshelf', 'smoker'])
 export const HOUSE_SECTION_CAPACITY = 100
-export const MINECRAFT_HOUSE_SYMBOLS = /^[.oscgpkydle]+$/u
-const Side = z.int().min(1).max(MINECRAFT_HOUSE_MAX_SIDE)
-const Volume = z.int().min(0).max(MINECRAFT_HOUSE_MAX_SIDE ** 3)
-const Count = z.int().min(0).max(MINECRAFT_HOUSE_MAX_BLOCKS)
+export const MINECRAFT_HOUSE_SYMBOLS = /^[.oscgpkydlefA-Z]+$/u
+const Side = z.int().min(1)
+const Volume = z.int().min(0)
+const Count = z.int().min(0)
 
 export const MinecraftHouseLayout = z.strictObject({
   width: Side,
   height: Side,
   depth: Side,
-  blocks: z.string().min(1).max(MINECRAFT_HOUSE_MAX_SIDE ** 3).regex(MINECRAFT_HOUSE_SYMBOLS),
-}).refine(({ width, height, depth, blocks }) => {
-  const placed = blocks.replaceAll('.', '').length
-  return blocks.length === width * height * depth && placed >= 1 && placed <= MINECRAFT_HOUSE_MAX_BLOCKS
-}, 'Layout must use its full volume with one to 20000 solid blocks')
+  blocks: z.string().min(1).regex(MINECRAFT_HOUSE_SYMBOLS),
+}).refine(({ width, height, depth, blocks }) => blocks.length === width * height * depth,
+  'Layout must cover its full volume with exact y,z,x coordinates')
 export type MinecraftHouseLayout = z.infer<typeof MinecraftHouseLayout>
 
 export const MINECRAFT_HOUSE_FACADE_MATERIALS = ['o', 's', 'c'] as const satisfies readonly MinecraftHouseSymbol[]
@@ -121,7 +150,7 @@ export function compileMinecraftHouseFacade(
   return { blocks: blocks.join('') }
 }
 
-export const MinecraftHouseRequest = z.strictObject({ zone: MinecraftAuthorizedZone, layout: MinecraftHouseLayout })
+export const MinecraftHouseRequest = z.strictObject({ zone: MinecraftAuthorizedZone, layout: MinecraftHouseLayout, replace: z.literal(true).optional() })
 export type MinecraftHouseRequest = z.infer<typeof MinecraftHouseRequest>
 
 const MinecraftHouseMaterialNeed = z.strictObject({
@@ -136,7 +165,7 @@ export const MinecraftHousePreview = z.strictObject({
   ready: z.boolean(),
   reason: z.string().regex(/^[a-z0-9-]{1,64}$/u).optional(),
   checked: Volume,
-  materials: z.array(MinecraftHouseMaterialNeed).min(1).max(10).optional(),
+  materials: z.array(MinecraftHouseMaterialNeed).min(1).max(36).optional(),
 }).refine(({ ready, reason, checked, materials }) => (!ready || checked > 0 && reason === undefined) &&
   (!materials || !ready && reason === 'homebuild-materials' && materials.some(row => row.missing > 0) &&
     new Set(materials.map(row => row.material)).size === materials.length &&
@@ -149,8 +178,9 @@ export const MinecraftHouseReceipt = z.strictObject({
   checked: Volume.min(1),
   placed: Count,
   consumed: z.partialRecord(Material, Count.min(1)),
+  creative: z.literal(true).optional(),
 }).refine(receipt => receipt.placed <= receipt.checked &&
-  Object.values(receipt.consumed).reduce((total, count) => total + count, 0) === receipt.placed)
+  Object.values(receipt.consumed).reduce((total, count) => total + count, 0) === (receipt.creative ? 0 : receipt.placed))
 export type MinecraftHouseReceipt = z.infer<typeof MinecraftHouseReceipt>
 
 export const MinecraftHouseDraftInput = z.strictObject({
@@ -158,7 +188,7 @@ export const MinecraftHouseDraftInput = z.strictObject({
   name: z.string().trim().min(1).max(80).regex(/^[^\p{Cc}]+$/u),
   layout: MinecraftHouseLayout,
   assumptions: z.string().trim().min(1).max(800).optional(),
-})
+}).refine(({ layout }) => layout.blocks.replaceAll('.', '').length > 0, 'A house draft requires at least one solid block')
 export type MinecraftHouseDraftInput = z.infer<typeof MinecraftHouseDraftInput>
 
 export const MinecraftHouseRecovery = z.strictObject({
@@ -223,20 +253,22 @@ export type MinecraftHouseSitePreview = MinecraftHousePreview & { previewId?: st
 export function minecraftHouseCells(layout: MinecraftHouseLayout) {
   return [...layout.blocks].map((value, index) => {
     const symbol = value as MinecraftHouseSymbol
+    const block = MINECRAFT_HOUSE_BLOCKS[symbol]
     return {
       x: index % layout.width,
       y: Math.floor(index / (layout.width * layout.depth)),
       z: Math.floor(index / layout.width) % layout.depth,
       symbol,
-      block: MINECRAFT_HOUSE_BLOCKS[symbol],
+      block,
+      material: block.split('[', 1)[0] as MinecraftHouseMaterial,
     }
   })
 }
 
 export function minecraftHouseMaterials(layout: MinecraftHouseLayout): Partial<Record<MinecraftHouseMaterial, number>> {
   const materials: Partial<Record<MinecraftHouseMaterial, number>> = {}
-  for (const { block } of minecraftHouseCells(layout)) {
-    if (block !== 'air') materials[block] = (materials[block] ?? 0) + 1
+  for (const { block, material } of minecraftHouseCells(layout)) {
+    if (block !== 'air') materials[material] = (materials[material] ?? 0) + 1
   }
   return materials
 }

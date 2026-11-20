@@ -1360,7 +1360,7 @@ python3.12 -m venv "$cover_env"
 - 手机歌唱话题复用既有配对、消息、附件与 WebSocket 连接，并保有独立的会话历史。旧宿主仍可使用普通聊天与原歌曲归档。完成的歌曲可在配对手机试听，工作台继续支持查看阶段、取消任务及选到私有舞台。
 - 隔离 DSH `0.2.1-rc.5` 用本地确定性模型响应、真实配对设备 API、MLX Demucs 和 Seed-VC 完成 18.05 秒中文音源的会话翻唱。四个 DSH 回合分别提交、查询运行状态、拒绝复用历史附件及查询成品。任务从接收到归档约 62 秒，成品 18.042 秒，配对下载返回 WAV 范围响应 `206`。SQLite v20 完整性和外键检查通过，独立口型包络已归档，分轨和换声暂存目录清空。 [测试音源](https://zenodo.org/records/6536490)
 - 宿主 58 项定向回归、TypeScript 检查和打包通过。候选包 SHA-256 为 `54fd8fe564d26fe7ba1eb1875784141a76b99f1d0a17766a61f00197f80a5ba9`，其中宿主 bundle 和隔离实测一致。正式宿主和安卓真机留待集中联调。
-- 安卓通过 18 项 Flutter 定向检查、Dart 分析和双语文案校验。Release ARM64 APK `versionCode` 为 `11091859`，签名与 `0.16.0` 一致，SHA-256 为 `c96b3fec7ee0a22946555b290c67a3e99464bdf45fb7d11e3cb9b476b893e3a1`。 [安卓候选 APK](../whale-companion-go-0.17.0-arm64.apk)
+- 安卓通过 18 项 Flutter 定向检查、Dart 分析和双语文案校验。Release ARM64 APK `versionCode` 为 `11091859`，签名与 `0.16.0` 一致，SHA-256 为 `c96b3fec7ee0a22946555b290c67a3e99464bdf45fb7d11e3cb9b476b893e3a1`。
 
 ## 73. Companion 0.45.0 与 Android 0.18.0 街区活动和营地日记
 
@@ -1369,7 +1369,7 @@ python3.12 -m venv "$cover_env"
 - 共享 `community` 投影最多返回四条已确认的自主营地回执。宿主核对成功的授权父任务及其成功的 Minecraft 子任务。营地日记投影只含动作、时间和可公开的路线枚举，普通活动写入无法生成这类回执。直线提前折返只确认返回，双段提前折返保留实际已确认的检查点数。网页小图把已确认路段与计划路段分开绘制。
 - 从两份真实 Fabric、CBI 与 Worker 隔离验收留下的 SQLite v17 副本读取了直线七格和向东再向南的双段回执，各保留一次完整完成和一次提前折返。被撤销的任务未进入日记。新版管理与配对 `/state` 投影相同，离线清除活动标记，配对撤销后拒绝读取。旧副本迁移到现有 v20 后，完整性与外键检查通过。此次验证复用了已保存的游戏回执。
 - 宿主 112 项定向检查、TypeScript 检查和打包通过。隔离 Chromium 用状态样本验证 320px 窄屏、键盘导航、实时与点选标记、旧宿主和过期状态，以及按实际检查点绘图。Companion 候选包 SHA-256 为 `53b5d618842c1e4eb1c8d9cc2a0c2567e701af5f31acab2bd8d2f058ac8de441`。
-- 安卓 30 项 Flutter 定向检查、Dart 分析和双语文案校验通过。Release ARM64 APK 的 `versionCode` 为 `11091912`，签名与 `0.17.0` 一致，SHA-256 为 `ef4120ecaa78ed83c6c7f3367428dce9787d035f09cf498dc69b4f11ec5fbfea`。正式宿主和安卓真机留待集中联调。 [安卓候选 APK](../whale-companion-go-0.18.0-arm64.apk)
+- 安卓 30 项 Flutter 定向检查、Dart 分析和双语文案校验通过。Release ARM64 APK 的 `versionCode` 为 `11091912`，签名与 `0.17.0` 一致，SHA-256 为 `ef4120ecaa78ed83c6c7f3367428dce9787d035f09cf498dc69b4f11ec5fbfea`。正式宿主和安卓真机留待集中联调。 [安卓候选 APK](https://github.com/ThySummer14/whale-companion-backup/releases/download/backup-2026-11-12/whale-companion-go-0.18.0-arm64.apk)
 
 ## 74. Companion 0.46.0 每日营地勘察
 
@@ -1824,7 +1824,7 @@ DSH_HOME="$RECOVERY_HOME" dsh plugin --profile companion-recovery add "$SNAPSHOT
 - 仅服务端控制台可以变更接管。解析和实际执行分别验证命令来源，避免外层 `execute as` 改变执行身份。CBI 内置自然语言开启时继续拥有自己的路径。旧版普通私聊、接管私聊、CBI 指令及内置自然语言使用不同路由标识，Companion 保持原私聊脱敏和送达校验。SQLite 沿用 v41。
 - 用最终宿主包和配套 JAR 在隔离 DSH、Fabric、Carpet 以及两个真实 Minecraft 客户端中验证。两条主人私聊均收到实际回复，客户端没有收到原关闭提示。访客继续收到 CBI 提示，`cbi status` 正常返回。玩家执行、控制台切换成玩家执行、真人目标和未鉴权的 Worker 请求均未获得接管权限。关闭自主后收到清除回执，重新打开可以续租，随后冻结宿主而保留 Worker 与游戏服在线，16.17 秒后的主人私聊恢复 CBI 提示。模型回复使用确定性回环夹具。 [隔离验收](../.work/minecraft-chat-relay-0.90/run-41sbic4r/evidence.json)
 - 569 项宿主与 Worker 定向测试、182 项 CBI 测试、33 项裁剪 SDK 兼容性测试通过。宿主和移动端 TypeScript 检查、构建及 `pnpm pack` 通过。正式 Coopcraft、Mac mini、安卓真机和签名 APK 留到集中验收。 [宿主回归](../.work/minecraft-chat-relay-0.90/regression.log) · [Java 测试](../.work/minecraft-chat-relay-0.90/java-tests.json) · [清理记录](../.work/minecraft-chat-relay-0.90/cleanup.json)
-- 宿主候选包 SHA-256 为 `2bd2360e87002f776e356e2de80abb4fc69a2cc0159e8cb4ff1045099a2bf3be`。CBI JAR 为 `38c39622dee9edc9c860f16aae14789455ba4b4283d41e236c2dcd79715810fd`。对应源码归档为 `5d20c35eb81db08238ce0d1f22e61bf7fd3fafa7e249b8f5e77b57596bec3168`。 [宿主候选包](../dsh-companion-bot-0.90.0.tgz) · [CBI JAR](../.work/minecraft-chat-relay-0.90/carpetbaritoneintegration-v1.7.1+260820-chat-relay-0.90.jar) · [对应源码](../.work/minecraft-chat-relay-0.90/CarpetBaritoneIntegration-chat-relay-0.90-source.tar.gz)
+- 宿主候选包 SHA-256 为 `2bd2360e87002f776e356e2de80abb4fc69a2cc0159e8cb4ff1045099a2bf3be`。CBI JAR 为 `38c39622dee9edc9c860f16aae14789455ba4b4283d41e236c2dcd79715810fd`。对应源码归档为 `5d20c35eb81db08238ce0d1f22e61bf7fd3fafa7e249b8f5e77b57596bec3168`。  · [CBI JAR](../.work/minecraft-chat-relay-0.90/carpetbaritoneintegration-v1.7.1+260820-chat-relay-0.90.jar) · [对应源码](../.work/minecraft-chat-relay-0.90/CarpetBaritoneIntegration-chat-relay-0.90-source.tar.gz)
 
 ## 120. Companion 0.91.0 跨场景记忆纠正
 
@@ -1833,7 +1833,7 @@ DSH_HOME="$RECOVERY_HOME" dsh plugin --profile companion-recovery add "$SNAPSHOT
 - Companion 主动调用闲置压缩前使用同一检查。模型执行遗忘工具只收到编号与遗忘状态，下一工具步骤也适用撤回。已写进原始聊天、旧工具结果或先前生成的摘要的内容，各自仍有独立的历史生命周期。SQLite 沿用 v41。
 - 使用实际配对设备 API、隔离 DSH、Fabric、Carpet、CBI 与真实 Minecraft 私聊完成双向写入及召回。手机写入的约定可由游戏按需召回，游戏写入的约定可由手机召回，两条原始对话和对方的私有记忆均未串场。0.90.0 在同一模型请求中保留了新旧暗号，原会话冷升级到 0.91.0 后只发送正确版本，同时保留同段的另一条事实。两端 Session ID 和原始历史一致。 [双向验收与模型输入证据](../.work/cross-scene-memory-0.91/run-h26sa02c/evidence.json)
 - 手机调用遗忘工具后，同回合的下一次模型请求已去除自动召回原文。之后核对可恢复、撤回共享后游戏不再收到该记录、修订历史及 SQLite 完整性。20 个模型请求使用确定性回环夹具。旧版冲突轮与升级后核对轮的自动召回文本分别为 1,012 和 882 字节，两轮的普通历史长度不同，不由此推算整轮 token 或费用。 [请求记录](../.work/cross-scene-memory-0.91/run-h26sa02c/model-requests.json)
-- 86 项定向测试、宿主与移动端 TypeScript 检查、构建及 `pnpm pack` 通过。候选包 SHA-256 为 `5159cf0e02643cc38fe5fc71f452302607e1fd193ef402f5ba4b4d8ab825032b`。正式 Coopcraft、Mac mini、真机和签名 APK 留到集中验收。 [宿主回归](../.work/cross-scene-memory-0.91/regression.log) · [候选包](../dsh-companion-bot-0.91.0.tgz) · [清理记录](../.work/cross-scene-memory-0.91/cleanup.json)
+- 86 项定向测试、宿主与移动端 TypeScript 检查、构建及 `pnpm pack` 通过。候选包 SHA-256 为 `5159cf0e02643cc38fe5fc71f452302607e1fd193ef402f5ba4b4d8ab825032b`。正式 Coopcraft、Mac mini、真机和签名 APK 留到集中验收。 [宿主回归](../.work/cross-scene-memory-0.91/regression.log) · [清理记录](../.work/cross-scene-memory-0.91/cleanup.json)
 
 ## 121. Companion 0.92.0 角色档案版本
 
@@ -1841,35 +1841,35 @@ DSH_HOME="$RECOVERY_HOME" dsh plugin --profile companion-recovery add "$SNAPSHOT
 - 当前固定档案以单一系统提示段进入已绑定聊天、游戏和话题根会话。摘要前 900 个字符纳入提示，完整档案留在工作台。旧版自动注入的档案从模型历史撤回。同一片段里仍可用的记忆保留，私有决策沿用各自的短提示。自我笔记、主人观察和档案编辑说明按各自的数据边界保存。
 - SQLite v41 的已保存档案导入第 1 版，保留原时间。版本内容及对应活动在同一事务提交。升级到 SQLite v42 前备份数据库与会话文件，回退插件时使用升级前的副本。正式 Mac mini、Coopcraft、安卓真机和签名 APK 留到集中验收。
 - 隔离 DSH 以 0.91.0 建立的独立配对聊天和 Minecraft 私聊会话原地升级。编辑到第 2 版、从第 1 版恢复为第 3 版后，两端后续模型请求各只含当前档案，旧自动注入档案退出。原聊天、自我笔记、共享记忆和升级前 SQLite 副本经核对。实际配对接口、Fabric、Carpet 与 CBI 参与验收，模型回复使用确定性回环夹具。 [迁移与请求验收](../.work/persona-0.92/run-qlry989v/evidence.json)
-- 230 项定向检查、TypeScript 检查、构建及 `pnpm pack` 通过。390 像素 Chromium 工作台完成保存、预览和恢复，页面没有横向溢出。最终候选包 SHA-256 为 `323bcc12bbcc19e21a1b3d76a848c33f77987eca5ab6b5edcf985f3b73df72ea`，宿主 bundle 与隔离端到端验收时一致。 [定向检查](../.work/persona-0.92/regression.log) · [窄屏工作台](../.work/persona-0.92/output/playwright/persona-history.png) · [候选包](../dsh-companion-bot-0.92.0.tgz)
+- 230 项定向检查、TypeScript 检查、构建及 `pnpm pack` 通过。390 像素 Chromium 工作台完成保存、预览和恢复，页面没有横向溢出。最终候选包 SHA-256 为 `323bcc12bbcc19e21a1b3d76a848c33f77987eca5ab6b5edcf985f3b73df72ea`，宿主 bundle 与隔离端到端验收时一致。 [定向检查](../.work/persona-0.92/regression.log) · [窄屏工作台](../.work/persona-0.92/output/playwright/persona-history.png)
 
 ## 122. Companion 0.93.0 跨场景行为修订
 
 - 自主复盘最多带入三条同一世界的旧观察与一条其他世界的旧观察。有文字相关的回执优先。没有词语重叠时，其他世界的候选需要已确认回执、行为标签和助手证据。早期自主活动的旧笔记可从精确匹配的原回执临时补齐复盘材料，SQLite 原记录与历史快照保留原样。
 - 聊天、Minecraft 和话题根会话在现有系统提示中读取一条当前行为倾向。相关的其他观察按需召回，跨场景只显示预定义标签。旧版已经进入模型历史的行为标签及无出处观察会被撤回，带编号的相关观察归档后也会撤回。原始日志、普通消息和仍有效的事实保持可追溯。
 - 隔离 DSH 从 0.92.0 升级时保留同一对配对手机及 Fabric 私聊会话。复盘用旧的 B 站字幕回执及已放置 94 块、核验 125 处的小屋回执完成一次修订。两端后续请求只收到新的行为提示，归档并重启后也撤回了新提示。B 站回执来自更早的回环元数据与主人提供的 WebVTT 夹具，Minecraft 回执来自隔离世界施工，决策使用确定性回环模型。 [隔离证据](../.work/growth-world-0.93/run-ktf_xxsx/evidence.json) · [模型请求](../.work/growth-world-0.93/run-ktf_xxsx/model-requests.json)
-- SQLite 保持 v42。248 项定向检查、宿主与移动端 TypeScript 检查、构建及打包通过。候选包 SHA-256 为 `b46a7ebede2487495b216461a5692294893bfc12772da58ed5a10d2b63f84e7d`，与隔离验证包仅 README 不同。正式 Coopcraft、Mac mini、安卓真机和签名 APK 留到集中验收。 [定向检查](../.work/growth-world-0.93/regression.log) · [候选包](../dsh-companion-bot-0.93.0.tgz) · [清理记录](../.work/growth-world-0.93/cleanup.json)
+- SQLite 保持 v42。248 项定向检查、宿主与移动端 TypeScript 检查、构建及打包通过。候选包 SHA-256 为 `b46a7ebede2487495b216461a5692294893bfc12772da58ed5a10d2b63f84e7d`，与隔离验证包仅 README 不同。正式 Coopcraft、Mac mini、安卓真机和签名 APK 留到集中验收。 [定向检查](../.work/growth-world-0.93/regression.log) · [清理记录](../.work/growth-world-0.93/cleanup.json)
 
 ## 123. Companion 0.94.0 每日窗口看片
 
 - 在工作台「自主」开启 B 站浏览和短片段，再在每日活动授权中允许 B 站浏览。大肥鱼可从已授权候选中选择字幕或抽样，按可用能力自己填写起点、时长和画面／声音模式。普通每日选择和启用主动目标工具的模式均支持。与普通自主浏览共用每 24 小时一次的尝试预算，每段至多 8 秒。前台开始、授权撤回、免打扰或窗口结束会阻止未完成的取样落账。
 - 取样结束后核对候选、已选区间、实际模态、私有理解回合及子任务回执。每日机会只接受匹配的回执，已完成的子任务可在重启后用于结算父任务。小家显示已核验的活动，配对聊天可以按需召回共享事实。后续复盘只读取片段回执，次日自主目标使用不带视频编号的简短事实。抽样画面、原始转写和私有观察留在隔离的理解会话。此链路不自动发布片段动态。
 - 隔离 DSH 经两项原生主动工具选中真实 B 站视频第 12 秒起的 6 秒，公开接口只请求了必要媒体范围，共 257,514 字节。最终一轮用实际 FFmpeg 生成抽样画面，用本机 Qwen3-ASR 转写。首轮只得到画面，验收重试得到了两种材料。观察和复盘由确定性测试模型输出。推进隔离时钟至次日并保留冷却后，下一次决策读到先前经历且没有下载媒体。手机配对接口读取小家并按需召回，私有上下文不可访问。 [完整链路证据](../.work/daily-bili-clips-0.94/real-dsh-rkbnof6_/evidence.json)
-- 407 项定向检查、TypeScript 检查、构建和打包通过。SQLite 保持 v42。候选包 SHA-256 为 `0430d3303eea2d93071132f3aefbe17b44db851f66a587f99a64bc446846c3fb`。正式环境、安卓真机与签名 APK 留到集中验收。 [定向检查](../.work/daily-bili-clips-0.94/regression.log) · [候选包](../dsh-companion-bot-0.94.0.tgz)
+- 407 项定向检查、TypeScript 检查、构建和打包通过。SQLite 保持 v42。候选包 SHA-256 为 `0430d3303eea2d93071132f3aefbe17b44db851f66a587f99a64bc446846c3fb`。正式环境、安卓真机与签名 APK 留到集中验收。 [定向检查](../.work/daily-bili-clips-0.94/regression.log)
 
 ## 124. Companion 0.95.0 短片段动态
 
 - 工作台新增独立的短片段分享开关，默认关闭。符合动态冷却条件时，大肥鱼在理解片段的同一模型回合决定是否附上一句感受。宿主核对实际模态、片段起点、候选、任务、来源和当前授权，然后写入原有私有动态。同一分 P 沿用既有分享去重。撤回、冷却和无有效感受时只保留看片经历。
 - 动态正文由角色感受与已核验模态组成，出处使用原有的分 P 和时间点格式。抽样画面、转写和私有观察留在理解会话。配对端的动态、实时事件与状态视图过滤私有发布和理解会话标识，收件箱与动态回复沿用现有入口。
 - 隔离 DSH 经每日自主工具选中真实 B 站第 12 秒起的 6 秒画面。FFmpeg 实际生成抽样图，媒体范围合计 173,170 字节。确定性测试模型在同一轮选择分享，随后用原生动态工具回复了配对端留言。动态和回复均到达收件箱及 WebSocket，另一个手机聊天 Session 只召回公开给配对端的经历。 [隔离证据](../.work/bili-clip-share-0.95/real-dsh-fkgw2i0p/evidence.json)
-- 421 项宿主定向检查、13 项 DSH Go 动态及收件箱测试、类型检查、构建和打包通过。SQLite 保持 v42。最终候选包 SHA-256 为 `a3c2347982138814230e5dc0b2dd340193537424380508441a77adbd5abb85c7`。实测包之后仅调整了纯音频感受的前缀，使其明确说明使用转写。正式环境、安卓真机与签名 APK 留到集中验收。 [宿主检查](../.work/bili-clip-share-0.95/regression.log) · [DSH Go 检查](../.work/bili-clip-share-0.95/flutter.log) · [宿主候选包](../dsh-companion-bot-0.95.0.tgz)
+- 421 项宿主定向检查、13 项 DSH Go 动态及收件箱测试、类型检查、构建和打包通过。SQLite 保持 v42。最终候选包 SHA-256 为 `a3c2347982138814230e5dc0b2dd340193537424380508441a77adbd5abb85c7`。实测包之后仅调整了纯音频感受的前缀，使其明确说明使用转写。正式环境、安卓真机与签名 APK 留到集中验收。 [宿主检查](../.work/bili-clip-share-0.95/regression.log) · [DSH Go 检查](../.work/bili-clip-share-0.95/flutter.log)
 
 ## 125. Companion 0.96.0 小家实时活动
 
 - 配对事件接口增加只读的 `view=home`。连接后立即取当前投影，活动或复盘状态改变时推送，稳定时每 10 秒发送心跳快照。有订阅时每 250 毫秒检查一次变化。该流不回放历史，只携带房间活动、锚点、街区位置、观察时间和可选的复盘状态。撤销配对关闭该设备的连接。
 - DSH Go 在小家前台且宿主声明支持时订阅，切页、退后台或撤销后关闭。已有状态接口继续负责最近活动、能力和营地进度。收到实时帧时，定期完整刷新间隔由约 5 秒降至约 20 秒。旧宿主、短时断线和超时回退到原轮询。最近记录和历史笔记保持原有刷新范围，较旧的 HTTP 响应不会盖掉新实时状态。
 - B 站实际取样后，宿主核对同一理解会话已收到的消息和图片，在真实理解回合期间继续显示阅读角。回合完成、取消、超时、换绑或输入失配后退出。隔离 DSH 对真实 B 站画面进行 FFmpeg 取样，确定性测试模型在收到片段后暂缓回复，配对流与完整状态都保持阅读中。放行后本机单次测得 30 毫秒回到窗前，随后真实配对聊天移到沙发，进入免打扰移到床边。最大实时帧 267 字节，撤销后连接关闭且 HTTP 拒绝访问。 [隔离验收](../.work/home-live-0.96/real-dsh-7tesmhqn/evidence.json)
-- 402 项宿主定向检查、19 项 Flutter 小家与状态测试、TypeScript 检查、构建和打包通过。SQLite 保持 v42。候选包 SHA-256 为 `731148d108935ddad8e02e852caf9a179f3a8b3a8ad6965f5230e3ac22d35217`。正式环境、安卓真机和签名 APK 留到集中验收。 [宿主检查](../.work/home-live-0.96/host.log) · [Flutter 检查](../.work/home-live-0.96/flutter.log) · [宿主候选包](../dsh-companion-bot-0.96.0.tgz)
+- 402 项宿主定向检查、19 项 Flutter 小家与状态测试、TypeScript 检查、构建和打包通过。SQLite 保持 v42。候选包 SHA-256 为 `731148d108935ddad8e02e852caf9a179f3a8b3a8ad6965f5230e3ac22d35217`。正式环境、安卓真机和签名 APK 留到集中验收。 [宿主检查](../.work/home-live-0.96/host.log) · [Flutter 检查](../.work/home-live-0.96/flutter.log)
 
 ## 126. Companion 0.97.0 手机播放回执
 
@@ -1877,7 +1877,7 @@ DSH_HOME="$RECOVERY_HOME" dsh plugin --profile companion-recovery add "$SNAPSHOT
 - 手机原生播放器确认起播或恢复后才上报，每 2 秒续报。暂停、结束、替换、失败和释放播放器时终止。宿主从音频来源决定说话或唱歌，按同一手机的原生起播顺序合并。终止状态覆盖同一轮迟到的心跳。撤销配对立即清理，断线时从最后一次续报起 6.5 秒到期。
 - 小家和街区沿用既有实时帧，同时参与前台活动判断。Minecraft 优先于语音活动。舞台口型继续由舞台自身音频驱动。播放标识和续报保留在宿主内存，实时帧不带消息、任务或设备标识。
 - 隔离真实 DSH 从已保存的助手消息走完 24 kHz PCM 与归档 WAV 路径，音频由确定性回环服务提供，播放回执用配对 HTTP 模拟。第二个配对客户端通过 WebSocket 观察到起播、暂停、恢复、结束、断线到期和撤销。单次 PCM 回执至小家更新 233 毫秒，断线到期 6.737 秒，最大实时帧 266 字节。Flutter 另行验证原生回调。 [隔离验收](../.work/mobile-playback-0.97/evidence.json)
-- 124 项宿主定向检查、58 项 Flutter 检查、TypeScript 检查、构建与打包通过。正式服务、安卓真机和签名 APK 留到集中验收。 [宿主检查](../.work/mobile-playback-0.97/host.log) · [Flutter 检查](../.work/mobile-playback-0.97/flutter.log) · [宿主候选包](../dsh-companion-bot-0.97.0.tgz)
+- 124 项宿主定向检查、58 项 Flutter 检查、TypeScript 检查、构建与打包通过。正式服务、安卓真机和签名 APK 留到集中验收。 [宿主检查](../.work/mobile-playback-0.97/host.log) · [Flutter 检查](../.work/mobile-playback-0.97/flutter.log)
 
 ## 127. Companion 0.98.0 动态单次回复
 
@@ -1885,7 +1885,7 @@ DSH_HOME="$RECOVERY_HOME" dsh plugin --profile companion-recovery add "$SNAPSHOT
 - 宿主只发布通过本轮证据核验的文字。更新的主人评论会淘汰旧草稿，删除原动态、停用开关、会话换绑或到期时停止旧评估的发布。每条回复关联一个已授权的任务来源，同一个任务只能留下一个发布回执。原有可选记忆整理仍独立进行。
 - 已发布内容仍进入配对线程、活动页、收件箱、实时流和小家最近记录。评估内容和任务来源留在宿主。SQLite 仍用既有 v42 格式。
 - 隔离 DSH 用相同原动态、评论和确定性模型结果比较最终候选与 0.97.0。两次回复从四个主模型请求减为两个，实际传输的消息与工具定义 JSON 从 30,584 字节减到 8,811 字节，约减少 71%。字节量用于比较这组样本，实际 token 取决于模型和缓存。联测另核对新评论替换、删除、主动沉默及配对输出。 [0.97.0 对照](../.work/feed-reply-0.98/evidence-0.97.0.json) · [0.98.0 验收](../.work/feed-reply-0.98/evidence-0.98.0.json)
-- 宿主定向回归、Flutter 动态与收件箱检查、TypeScript 检查、构建与打包通过。正式服务、安卓真机和签名 APK 留到集中验收。 [宿主检查](../.work/feed-reply-0.98/regression.log) · [Flutter 检查](../.work/feed-reply-0.98/flutter.log) · [宿主候选包](../dsh-companion-bot-0.98.0.tgz)
+- 宿主定向回归、Flutter 动态与收件箱检查、TypeScript 检查、构建与打包通过。正式服务、安卓真机和签名 APK 留到集中验收。 [宿主检查](../.work/feed-reply-0.98/regression.log) · [Flutter 检查](../.work/feed-reply-0.98/flutter.log)
 
 ## 128. Companion 0.99.0 Minecraft 短时举盾
 
@@ -1894,7 +1894,7 @@ DSH_HOME="$RECOVERY_HOME" dsh plugin --profile companion-recovery add "$SNAPSHOT
 - 隔离 Fabric 1.21.1 实测同方向的原版伤害。未举盾掉 6 点血，举盾时掉 0 点，盾牌扣了耐久。两次完整动作分别回读 20 tick 中格挡 15 tick、60 tick 中格挡 55 tick，均确认结束时放下。另验证缺盾、忙碌、未认证请求、原始 CBI 指令绕过、TNT 中断、手机暂停和下线。
 - 真实游戏客户端私聊触发独立游戏会话，确定性回环模型调用 `mc_shield` 和 `mc_chat`，按工具回执私聊回应。配对手机的另一 Session 随后召回已验收经历，工具权限仍留在游戏侧。隔离世界副本已清理，原模板区块哈希一致。 [隔离验收](../.work/minecraft-shield-0.99/evidence.json)
 - 363 项宿主和 Worker 定向回归通过，最终投影及启动处理的 53 项定向回归通过。CBI 217 项 Java 检查、27 项 Flutter 检查、构建和打包通过。正式 Coopcraft、真机和签名 APK 留到集中验收。 [宿主检查](../.work/minecraft-shield-0.99/regression.log) · [CBI 检查](../.work/minecraft-shield-0.99/java-tests.json) · [Flutter 检查](../.work/minecraft-shield-0.99/flutter.log)
-- 使用短时举盾需搭配本候选的 Companion 包与 CBI JAR。 [宿主候选包](../dsh-companion-bot-0.99.0.tgz) · [CBI JAR](../.work/minecraft-shield-0.99/carpetbaritoneintegration-v1.7.1+260820-shield-0.99.jar) · [配套源码](../.work/minecraft-shield-0.99/CarpetBaritoneIntegration-shield-0.99-source.tar.gz)
+- 使用短时举盾需搭配本候选的 Companion 包与 CBI JAR。  · [CBI JAR](../.work/minecraft-shield-0.99/carpetbaritoneintegration-v1.7.1+260820-shield-0.99.jar) · [配套源码](../.work/minecraft-shield-0.99/CarpetBaritoneIntegration-shield-0.99-source.tar.gz)
 
 ## 129. Companion 0.100.0 按需情绪配音
 
@@ -1911,7 +1911,7 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 
 在 Companion 配置中同时填入 `ttsExpressivePythonPath` 和 `ttsExpressiveModelDir` 的绝对路径。准备目录约 2.74 GB，包含约 4.19 MB 的音色缓存。准备完成后，正常合成使用这一目录和 Python 环境。状态接口只在必需文件齐备时公布支持的预设和上限。请求共享现有语音队列，同一时间只运行一个 WAV 任务。相同会话、原文、语气及模型版本的结果可重用。排队或合成中可以停止，取消和失败的结果可重试。
 
-实际 DSH 隔离宿主以 Apple M5、24 GiB 运行真实 IndexTTS。同一句中文生成三份完整 PCM WAV，从请求至宿主可下载分别用时 8.90 秒（参考音色）、8.45 秒（开心）、10.91 秒（低落），这组时间以完整文件就绪为准。通过了 52 项隔离检查、93 项宿主回归、61 项 Flutter 检查和构建打包。实时 PCM 和默认 WAV 接口用确定性音频夹具核对了兼容性。正式 16 GiB Mac mini 的同机占用、真机和签名 APK 留到集中验收。 [隔离验收](../.work/expressive-tts-0.100/evidence.json) · [宿主回归](../.work/expressive-tts-0.100/regression.log) · [Flutter 检查](../.work/expressive-tts-0.100/flutter.log) · [候选包](../dsh-companion-bot-0.100.0.tgz)
+实际 DSH 隔离宿主以 Apple M5、24 GiB 运行真实 IndexTTS。同一句中文生成三份完整 PCM WAV，从请求至宿主可下载分别用时 8.90 秒（参考音色）、8.45 秒（开心）、10.91 秒（低落），这组时间以完整文件就绪为准。通过了 52 项隔离检查、93 项宿主回归、61 项 Flutter 检查和构建打包。实时 PCM 和默认 WAV 接口用确定性音频夹具核对了兼容性。正式 16 GiB Mac mini 的同机占用、真机和签名 APK 留到集中验收。 [隔离验收](../.work/expressive-tts-0.100/evidence.json) · [宿主回归](../.work/expressive-tts-0.100/regression.log) · [Flutter 检查](../.work/expressive-tts-0.100/flutter.log)
 
 [参考音色](../.work/expressive-tts-0.100/audio/reference.wav) · [开心](../.work/expressive-tts-0.100/audio/happy.wav) · [低落](../.work/expressive-tts-0.100/audio/sad.wav)
 
@@ -1920,41 +1920,41 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - Minecraft、B 站与歌唱沿用原执行适配器，通过同一接入点装配启动、工具、状态与退出。动作按场景 ID 和会话类型限制可见性与执行。新建和换绑时校验保留场景类型。普通聊天与其他游戏继续使用自己的工具策略。各 World 保留已有的主人授权、急停、音频校验和真实回执流程。
 - DSH Go 状态页显示 Minecraft、B 站和歌唱工作室。Minecraft 读取现有 Worker 回传并遵循营地暂停，旧观测到期后显示不可用。B 站显示实际读取、近期成功或上游冷却，歌唱区分配置状态和正在合成。清单只携带显示所需字段。旧宿主继续使用原有能力状态。
 - 用最终候选包启动隔离 DSH 和 Fabric。B 站工具读取匿名公开视频资料，游戏私聊触发真实 CBI 举盾和释放，手机随后跨会话召回该回执。配对暂停只改变 Minecraft，随后恢复并确认实际下线。歌唱通过确定性回环 Provider 验证忙碌、WAV 归档和逐字节配对下载。模型决策使用确定性回环模型。五个用户场景保持独立，状态清单测得 189 字节。 [34 项隔离验收](../.work/world-connectors-0.101/evidence.json)
-- 265 项宿主定向回归、70 项 Flutter 检查、TypeScript 检查、构建与打包通过。验证还覆盖未配置与故障状态、工具声明与实际注册一致、额外测试连接器的接入和释放。隔离服副本已清理，模板区域哈希一致。正式服务、真机和签名 APK 留到集中验收。 [宿主检查](../.work/world-connectors-0.101/regression-final.log) · [Flutter 检查](../.work/world-connectors-0.101/flutter.log) · [宿主候选包](../dsh-companion-bot-0.101.0.tgz)
+- 265 项宿主定向回归、70 项 Flutter 检查、TypeScript 检查、构建与打包通过。验证还覆盖未配置与故障状态、工具声明与实际注册一致、额外测试连接器的接入和释放。隔离服副本已清理，模板区域哈希一致。正式服务、真机和签名 APK 留到集中验收。 [宿主检查](../.work/world-connectors-0.101/regression-final.log) · [Flutter 检查](../.work/world-connectors-0.101/flutter.log)
 
 ## 131. Companion 0.102.0 自主行动未确认后的接续
 
 - 主动目标进入授权行动流程后，若结果未取得完成回执，可在原有效期内进入待续列表。已提交目标但未通过执行准入的情况沿用原流程。对已有目标的未确认尝试保留原意图及到期时间，更新上次未确认的世界。新目标首次进入待续后最多保留七天，同日重启继续遵循一次机会限制。
 - 下一次授权窗口由大肥鱼读取实时选项，再决定接续、改写、暂存或放下。接续时可以沿用目标原文，只填本轮待续编号、证据和动作。把视频参数传给游戏动作会收到具体的改正提示。宿主继续按现有权限和完成回执核对执行，配对端与共享记忆只读取经核验的实际经历。
 - 隔离 DSH 与 Fabric 用推进时钟模拟跨日。首日用确定性工具调用选东路，测试在提交后放置障碍。复查拒绝出发，冷启动后没有同日重跑。次日本机 Qwen3-4B Q4_K_M 自行从新选项选择南路，经参数修正后走了 7 格并返回。手机在原会话召回南路回执。模型最后的私有文字仍误述方向和参数，工作台行动结果及共享记忆取自工具和游戏回执。 [隔离验收](../.work/initiative-recovery-0.102/evidence.json) · [实际模型工具调用](../.work/initiative-recovery-0.102/model-trace.json) · [Qwen GGUF](https://www.modelscope.cn/models/Qwen/Qwen3-4B-GGUF) · [llama.cpp 函数调用](https://github.com/ggml-org/llama.cpp/blob/v0.9.0/docs/function-calling.md)
-- 这组本地对照中，修正参数前后模型请求从 8 次降至 4 次，累计输入从 16,409 降至 6,970 token，均含缓存读取。改动前模型在反复拒绝后放下目标，修正后完成了勘察。通过 40 项隔离验收、462 项定向回归、TypeScript 检查、构建和打包。SQLite 保持 v42。正式 Mac mini、Coopcraft、安卓真机和签名 APK 留到集中验收。 [回归](../.work/initiative-recovery-0.102/regression-final.log) · [候选包](../dsh-companion-bot-0.102.0.tgz)
+- 这组本地对照中，修正参数前后模型请求从 8 次降至 4 次，累计输入从 16,409 降至 6,970 token，均含缓存读取。改动前模型在反复拒绝后放下目标，修正后完成了勘察。通过 40 项隔离验收、462 项定向回归、TypeScript 检查、构建和打包。SQLite 保持 v42。正式 Mac mini、Coopcraft、安卓真机和签名 APK 留到集中验收。 [回归](../.work/initiative-recovery-0.102/regression-final.log)
 
 ## 132. Companion 0.103.0 主动提案回执
 
 - 私有每日会话提交有效目标、暂存或放下时，工具用 DSH 原生结束标记收束当前轮次。参数错误仍可在轮内修正，模型也可以直接选择休息。宿主将提案绑定到当前会话、轮次、步骤及工具调用，要求该调用的成功回执进入会话记录、轮次正常结束且现行授权仍有效，才接受提案进入执行流程。
 - 工作台分别显示原目标、本轮所选动作和实际结果。所选动作来自宿主预检提供的选项说明，选定的路线、完成结果及共享记忆分别有对应记录。成功提案的会话与回执序号留在宿主。SQLite 继续使用 v42，旧提案记录可照常查看。
 - 最终候选与 0.102.0 使用真实隔离 DSH、Fabric、Carpet 和 CBI 做同一路线对照。确定性模型在旧版成功提案后再发一条错误方向的文字，新版在工具回执结束，模型请求从 3 次降至 2 次，完整请求正文从 22,299 降至 14,125 字节。两个版本均确认向东走 7 格并回营。新版另通过参数错误后修正、向南实走、暂存、次日放下、主动休息和配对召回。 [对照与落盘回执](../.work/initiative-terminal-0.103/comparison.json) · [隔离验收](../.work/initiative-terminal-0.103/evidence-0.103.0.json)
-- 51 项候选隔离验收、19 项旧版对照、479 项定向回归、TypeScript 检查、构建和打包通过。读取实际 DSH 压缩会话日志，核对四次提案均依序保存调用、成功回执和正常轮次结束。正式服务、安卓真机和签名 APK 留到集中验收。 [定向回归](../.work/initiative-terminal-0.103/regression.log) · [候选包](../dsh-companion-bot-0.103.0.tgz)
+- 51 项候选隔离验收、19 项旧版对照、479 项定向回归、TypeScript 检查、构建和打包通过。读取实际 DSH 压缩会话日志，核对四次提案均依序保存调用、成功回执和正常轮次结束。正式服务、安卓真机和签名 APK 留到集中验收。 [定向回归](../.work/initiative-terminal-0.103/regression.log)
 
 ## 133. Companion 0.104.0 图文动态断线重试
 
 - DSH Go 根据配对健康接口公布的能力选择一次提交入口。草稿打开期间，原样重试使用同一请求编号。宿主按设备区分请求，首次创建返回 201，内容一致的重试返回原回执。正文、图片或评论目标不同则返回冲突，已删除的帖子不会被重试恢复。旧宿主仍可使用原上传、发布和回复接口。
 - 图片先写入私有文件，随后与动态及活动记录一起提交到现有 SQLite v42。并发重试会移除多余暂存文件。宿主媒体扫描保留已发布图片，将超过一小时且没有动态引用的中断暂存文件纳入常规缓存清理。
-- 最终包安装到隔离 DSH。模拟提交后断线、六个并发重试及宿主冷重启，核对原回执、图片字节、活动和自主回复排程均未重复。另核对上传途中撤销配对、已删除线程、旧版上传和发帖接口，以及孤立图片的预览与清理。52 项隔离验收、160 项宿主回归、34 项 Flutter 检查、Dart 与 TypeScript 分析、构建和打包通过。正式宿主、真机和签名 APK 留到集中验收。 [隔离验收](../.work/feed-publish-0.104/evidence.json) · [宿主检查](../.work/feed-publish-0.104/regression.log) · [Flutter 检查](../.work/feed-publish-0.104/flutter.log) · [宿主候选包](../dsh-companion-bot-0.104.0.tgz)
+- 最终包安装到隔离 DSH。模拟提交后断线、六个并发重试及宿主冷重启，核对原回执、图片字节、活动和自主回复排程均未重复。另核对上传途中撤销配对、已删除线程、旧版上传和发帖接口，以及孤立图片的预览与清理。52 项隔离验收、160 项宿主回归、34 项 Flutter 检查、Dart 与 TypeScript 分析、构建和打包通过。正式宿主、真机和签名 APK 留到集中验收。 [隔离验收](../.work/feed-publish-0.104/evidence.json) · [宿主检查](../.work/feed-publish-0.104/regression.log) · [Flutter 检查](../.work/feed-publish-0.104/flutter.log)
 
 ## 134. Companion 0.105.0 聊天断线重试
 
 - 新版手机和宿主都支持时，文字、转写和附件发送沿用当前草稿的请求编号，并携带开始发送时的会话。宿主从 DSH 的待处理消息和原始会话事件查回执，对文字、语音回复选择、附件顺序、名称及上传内容做指纹核对。重复确认复用原消息编号，冲突或换绑会保留手机草稿并提示。既有配对客户端和宿主继续走各自支持的入口。
 - 已接收回执沿用 DSH 队列含义。已进入原始会话日志的消息可在冷重启后确认，压缩模型上下文不影响回执查找。DSH Go 收到旧回执后读取当前运行状态，使已完成的旧回复恢复到可输入状态。
 - 在两个版本的真实隔离 DSH 上，用同一条手机消息模拟发出请求后未读取响应。0.104.0 在重试时再次送入模型，0.105.0 只返回原回执。主模型请求由两次降为一次，实际请求正文由 11,653 字节降为 5,759 字节。这是回环模型夹具的 HTTP 正文计量。新版还核对六路并发、附件逐字节下载、撤销、场景换绑、冷重启和 SQLite v42 完整性。 [0.104.0 对照](../.work/chat-retry-0.105/evidence-0.104.0.json) · [0.105.0 隔离验收](../.work/chat-retry-0.105/evidence-0.105.0.json)
-- 44 项候选隔离检查、221 项宿主回归、补充的入队与落盘时序检查、52 项 Flutter 检查，以及 Dart、TypeScript、构建与打包通过。正式宿主、真机和签名 APK 留到集中验收。 [宿主回归](../.work/chat-retry-0.105/regression.log) · [时序回归](../.work/chat-retry-0.105/focused.log) · [Flutter 检查](../.work/chat-retry-0.105/flutter.log) · [候选包](../dsh-companion-bot-0.105.0.tgz)
+- 44 项候选隔离检查、221 项宿主回归、补充的入队与落盘时序检查、52 项 Flutter 检查，以及 Dart、TypeScript、构建与打包通过。正式宿主、真机和签名 APK 留到集中验收。 [宿主回归](../.work/chat-retry-0.105/regression.log) · [时序回归](../.work/chat-retry-0.105/focused.log) · [Flutter 检查](../.work/chat-retry-0.105/flutter.log)
 
 ## 135. Companion 0.106.0 自主行动与自我观察依据
 
 - 自主复盘保留原始回执和实际模型原话。给模型的 B 站材料省略视频编号，小屋回执概述核对与放置结果。角色可跳过、写下新观察或在有新依据时修订旧观察。重复原观察的输出结束本次复盘，保留旧笔记。
 - 主动计划仍只从观察工具收到有限的行为标签。选用标签时，宿主核对本轮实际提供的笔记及版本，防止归档、重新启用或替换后的同名标签沿用旧提案。验收通过后，任务记录笔记 ID 和版本。管理工作台可打开该历史快照，配对端不接收这一内部关联。SQLite 保持 v42。
 - 最终候选在隔离 DSH 推进三个模拟日。真实本地 Qwen3-4B 跳过旧字幕回执，随后从此前真实 Fabric 的小屋验收回执写出一条核对习惯。配对聊天收到标签，笔记正文和私有来源留在宿主。第三日的确定性测试决策引用此标签，原生工具提交并完成 B 站阅读连接器，元数据使用回环夹具，字幕由验收程序提供。归档后仍可打开行动当时的版本。 [30 项隔离验收](../.work/growth-real-0.106/evidence-0.106.0.json) · [实际模型输出](../.work/growth-real-0.106/model-trace-0.106.0.json) · [模型权重说明](https://huggingface.co/mlx-community/Qwen3-4B-Instruct-2507-4bit)
-- 311 项定向回归、TypeScript 检查、构建和打包通过。窄屏 Chromium 验证了历史版本请求、笔记来源显示和关闭后的键盘焦点。临时模型和下载缓存已清理。正式宿主、真机和签名 APK 留到集中验收。 [宿主回归](../.work/growth-real-0.106/regression-final.log) · [浏览器检查](../.work/growth-real-0.106/browser/after.log) · [清理记录](../.work/growth-real-0.106/cleanup.json) · [宿主候选包](../dsh-companion-bot-0.106.0.tgz)
+- 311 项定向回归、TypeScript 检查、构建和打包通过。窄屏 Chromium 验证了历史版本请求、笔记来源显示和关闭后的键盘焦点。临时模型和下载缓存已清理。正式宿主、真机和签名 APK 留到集中验收。 [宿主回归](../.work/growth-real-0.106/regression-final.log) · [浏览器检查](../.work/growth-real-0.106/browser/after.log) · [清理记录](../.work/growth-real-0.106/cleanup.json)
 
 ## 136. Companion 0.107.0 参考图屋顶轮廓
 
@@ -1962,7 +1962,7 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - 台阶屋顶使用五格高度，门洞保留三格，墙窗留在屋檐以下。当前整份小屋的宽、深、高仍各最多五格，实体方块最多 100 个，开工继续绑定授权区域、草案版本和本次预检。
 - 隔离 DSH 用本地 Qwen3-VL-8B 读两张方块参考图并保存草案。居中屋脊读对，左窗偏一格。另一张图的沿进深抬高屋顶被读成居中屋脊。施工前在工作台修正了两份原草案，分别改动 2 和 49 格，保留原图关联与历史版本。窄屏 Chromium 核对了左视图的进深列数、原图对照和编辑撤销。 [模型与草案验收](../.work/roof-profile-0.107/vision-evidence.json) · [工作台检查](../.work/roof-profile-0.107/browser/undone.log)
 - 旧 CBI 实放到 72 和 79 块后，因封檐造成剩余位置不可达而停止。新 CBI 优先寻找高处和直接承托的可达位置，之后才封闭剩余檐层。两份草案在隔离 Fabric 分别实放 84 和 94 块，每栋独立回读 125 格及边界，核对实际耗材、返回起点和重试回执。缺料、占用预留空气格和未经预检均未派发建造。 [旧版对照](../.work/roof-profile-0.107/evidence-stepped.json) · [居中屋脊](../.work/roof-profile-0.107/fixed-center-ridge/evidence-roof-fixed.json) · [沿进深抬高](../.work/roof-profile-0.107/fixed-rear-step/evidence-roof-fixed.json)
-- 313 项宿主定向回归、218 项 Java 检查、TypeScript 检查、构建和打包通过。SQLite 保持 v42。使用台阶屋顶的施工候选需配套 CBI。临时视觉模型、下载缓存及本轮隔离服副本已清理，隔离世界模板区域哈希一致。正式服务、真机和签名 APK 留到集中验收。 [宿主回归](../.work/roof-profile-0.107/regression-final.log) · [Java 检查](../.work/roof-profile-0.107/cbi-test-summary.json) · [宿主候选包](../dsh-companion-bot-0.107.0.tgz) · [CBI JAR](../.work/roof-profile-0.107/carpetbaritoneintegration-v1.7.1+260820-stepped-roof-0.107.jar) · [配套源码](../.work/roof-profile-0.107/CarpetBaritoneIntegration-stepped-roof-0.107-source.tar.gz) · [清理记录](../.work/roof-profile-0.107/cleanup.json)
+- 313 项宿主定向回归、218 项 Java 检查、TypeScript 检查、构建和打包通过。SQLite 保持 v42。使用台阶屋顶的施工候选需配套 CBI。临时视觉模型、下载缓存及本轮隔离服副本已清理，隔离世界模板区域哈希一致。正式服务、真机和签名 APK 留到集中验收。 [宿主回归](../.work/roof-profile-0.107/regression-final.log) · [Java 检查](../.work/roof-profile-0.107/cbi-test-summary.json) · [CBI JAR](../.work/roof-profile-0.107/carpetbaritoneintegration-v1.7.1+260820-stepped-roof-0.107.jar) · [配套源码](../.work/roof-profile-0.107/CarpetBaritoneIntegration-stepped-roof-0.107-source.tar.gz) · [清理记录](../.work/roof-profile-0.107/cleanup.json)
 
 ## 137. Companion 0.108.0 Minecraft 分区施工
 
@@ -1971,7 +1971,7 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - 全部分区有施工回执后，可请求整栋复查。成功结果来自游戏服一条命令中的全体方块和留空条件，同时检查维度、加载状态及角色连接。不能复核的分区单独列出。首次整栋确认后写一条可跨场景召回的共享经历，后续复查保留各分区历史回执。
 - 可用组合沿用 0.107 的 CBI。双翼样例宽 10、深 5、高 4，实放 156 块。东翼完成后冷重启宿主，缺料补齐并重新确认西翼。西翼放到 76 块时因封顶挡住上台阶净空而中断。测试把角色移到已建成的连廊站位，重新预检后只补了 2 块，复查全 200 格通过。取走西翼一块地板并在东翼留空放置箱子可定位到两个分区，恢复后再次核对通过。 [中断对照](../.work/house-project-0.108/fabric-acceptance.wfUsDNgx/evidence.json) · [真实续建](../.work/house-project-0.108/fabric-acceptance.mLZoRWxY/evidence.json) · [共享记忆核对](../.work/house-project-0.108/fabric-acceptance.mLZoRWxY/receipt-audit.json) · [配套 CBI](../.work/roof-profile-0.107/carpetbaritoneintegration-v1.7.1+260820-stepped-roof-0.107.jar)
 - 两次施工顺序实验分别在东翼中央屋顶不可达和最后一块前触发走位保护时中断。最后一次实验只缺连廊入口上方一块圆石。保留实际存档差异和错误回执，后续可据此验证角色自行换站位。 [存档差异](../.work/house-project-0.108/saved-world-placement-diff.json) · [入口净空实验](../.work/house-project-0.108/fabric-acceptance.OyEJdP58/evidence.json)
-- 37 项隔离施工验收、4 项落盘核对、12 项真实 Worker 检查、28 项窄屏 Chromium 检查和 416 项定向回归通过。真实 Worker 通过预置 750 格的整体验收检查，包括正常空气、洞穴空气和虚空空气。TypeScript、构建和打包通过。正式服务、安卓真机和签名 APK 留到集中验收。 [宿主候选包](../dsh-companion-bot-0.108.0.tgz) · [Worker 证据](../.work/house-project-worker-0.108/worker-evidence.json) · [浏览器证据](../.work/house-project-ui-0.108/evidence.json) · [回归](../.work/house-project-0.108/regression-final.log)
+- 37 项隔离施工验收、4 项落盘核对、12 项真实 Worker 检查、28 项窄屏 Chromium 检查和 416 项定向回归通过。真实 Worker 通过预置 750 格的整体验收检查，包括正常空气、洞穴空气和虚空空气。TypeScript、构建和打包通过。正式服务、安卓真机和签名 APK 留到集中验收。  · [Worker 证据](../.work/house-project-worker-0.108/worker-evidence.json) · [浏览器证据](../.work/house-project-ui-0.108/evidence.json) · [回归](../.work/house-project-0.108/regression-final.log)
 
 ## 138. Companion 0.109.0 Minecraft 施工决策
 
@@ -1979,21 +1979,21 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - 大肥鱼可建议先建已通过预检的分区、为实际缺料的分区备料，或暂缓施工。建议只能引用本轮实际观察过的分区，并核对会话、地块、观察时效和施工状态。最新建议持久保存，开工后清掉旧建议。工作台选中建议分段后，仍由主人重新预检并确认开工。SQLite 保持 v43。
 - 初次真实模型试验读对了预检却只在聊天中回答。修改工具说明和观察回执后，同一句请求下模型先提出开建缺料西翼，宿主拒绝。模型改为给西翼备 1 块橡木木板，建议成功落盘。 [初次试验](../.work/house-project-planning-0.109/run-0.109.0-cr1b4lv0/model-trace.json) · [实际备料建议](../.work/house-project-planning-0.109/run-0.109.0-dp3g2fen/evidence.json)
 - 最终候选用真实 DSH、配对聊天、Fabric、Carpet 和 Qwen3-4B。在一翼就绪的场景，主人只给出就绪优先，模型选了东翼。两翼都缺料后，模型决定给西翼备 26 块橡木木板。观察和参数拒绝回执都列出可选分段，避免再次读取现场。两轮分别用 3 和 4 次模型请求，累计输入 5,632 和 7,550 token。这是本地模型实测值。 [真实隔离验收](../.work/house-project-planning-0.109/run-0.109.0-497exb1n/evidence.json) · [真实模型工具轨迹](../.work/house-project-planning-0.109/run-0.109.0-497exb1n/model-trace.json)
-- 35 项真实隔离验收、30 项窄屏浏览器检查、206 项定向回归及 TypeScript、构建和打包通过。确认 200 个现场位置、角色站位和背包均未被规划工具改动，假开工凭据被拒绝，主人可另行取得预检，建议在真实 DSH 冷重启后仍可读取。正式服务、真机及签名 APK 留到集中验收。 [浏览器验收](../.work/house-project-plan-ui-0.109/evidence.json) · [定向回归](../.work/house-project-planning-0.109/regression-final.log) · [候选包](../dsh-companion-bot-0.109.0.tgz)
+- 35 项真实隔离验收、30 项窄屏浏览器检查、206 项定向回归及 TypeScript、构建和打包通过。确认 200 个现场位置、角色站位和背包均未被规划工具改动，假开工凭据被拒绝，主人可另行取得预检，建议在真实 DSH 冷重启后仍可读取。正式服务、真机及签名 APK 留到集中验收。 [浏览器验收](../.work/house-project-plan-ui-0.109/evidence.json) · [定向回归](../.work/house-project-planning-0.109/regression-final.log)
 
 ## 139. Companion 0.110.0 Minecraft 施工站位恢复
 
 - 分区上次因站位、视线或走位中断时，已声明恢复能力的 CBI 可以预检可施工且可撤回的位置。预检确认至少一处当前可达的放置位置，执行过程中再逐步核对后续站位。规划工具能据此建议换站位续建。主人在工作台拿到新预检后确认，开工凭据绑定分区和恢复模式，失效后重新预检。普通施工与旧 CBI 路径保留。
 - 恢复先用普通路线，再尝试有支撑且可往返的一格台阶。低门洞采用生存模式下的蹲跳，下降时降低向前速度。游戏服逐步检查净空、实体、位置和退路，Worker 独立核对分区、扣料和角色返回原站位。施工回执标记恢复模式，SQLite 保持 v43。
 - 隔离服用上次中断的数据库和存档差异重建 154 块现场。旧 CBI 从原起点返回不可达，实放 0 块。第一次恢复试验放了两块后在下台阶时偏离走位范围，未记完工。减速版从同一起点自行跨上 y81，补两块云杉木板并返回距起点 0.086 格处。86 组独立位置采样均在授权内，施工开始后没有传送、现场修改或补料。整栋复核 156 个实体方块及 44 个留空，冷重启保留原失败任务和唯一共享经历。 [旧版对照](../.work/house-project-recovery-0.110/baseline.aGHS0oN4/evidence.json) · [走位保护对照](../.work/house-project-recovery-0.110/java.z2Hgmf04/evidence.json) · [新版实地验收](../.work/house-project-recovery-0.110/candidate.0m02ZsnL/evidence.json)
-- 25 项新版真实隔离验收、7 项旧版对照、37 项窄屏浏览器检查、219 项宿主及 Worker 定向回归和 219 项 Java 检查通过。宿主通过 TypeScript、构建和打包。最终 Worker 收紧了位置和库存的日志识别，并用隔离服真实记录交错回放通过。正式服、真机和签名 APK 留到集中验收。 [候选包](../dsh-companion-bot-0.110.0.tgz) · [配套 CBI](../.work/house-project-recovery-0.110/carpetbaritoneintegration-v1.7.1+260820-stance-recovery-0.110.jar) · [对应源码与许可](../.work/house-project-recovery-0.110/CarpetBaritoneIntegration-stance-recovery-0.110-source.tar.gz) · [浏览器验收](../.work/house-project-recovery-0.110/browser/evidence.json) · [宿主与 Worker 回归](../.work/house-project-recovery-0.110/regression-final.log) · [实际日志回放](../.work/house-project-recovery-0.110/live-nbt-replay.log) · [Java 检查](../.work/house-project-recovery-0.110/cbi-test-summary.json) · [隔离副本清理](../.work/house-project-recovery-0.110/fixture-cleanup.json)
+- 25 项新版真实隔离验收、7 项旧版对照、37 项窄屏浏览器检查、219 项宿主及 Worker 定向回归和 219 项 Java 检查通过。宿主通过 TypeScript、构建和打包。最终 Worker 收紧了位置和库存的日志识别，并用隔离服真实记录交错回放通过。正式服、真机和签名 APK 留到集中验收。  · [配套 CBI](../.work/house-project-recovery-0.110/carpetbaritoneintegration-v1.7.1+260820-stance-recovery-0.110.jar) · [对应源码与许可](../.work/house-project-recovery-0.110/CarpetBaritoneIntegration-stance-recovery-0.110-source.tar.gz) · [浏览器验收](../.work/house-project-recovery-0.110/browser/evidence.json) · [宿主与 Worker 回归](../.work/house-project-recovery-0.110/regression-final.log) · [实际日志回放](../.work/house-project-recovery-0.110/live-nbt-replay.log) · [Java 检查](../.work/house-project-recovery-0.110/cbi-test-summary.json) · [隔离副本清理](../.work/house-project-recovery-0.110/fixture-cleanup.json)
 
 ## 140. Companion 0.111.0 Minecraft 授权自主施工
 
 - 主人在每日时段内额外授权一个同地块、未完工的已保存建筑工程，并开启主动目标。角色已在线且空闲时，大肥鱼可用原生提案从实际可施工的分区中选择一段，也可休息。建筑授权独立于登录、补给和营地权限。建筑选项只携带分区名称、编号和是否需要站位恢复。
 - 每日最多消耗一次主动机会。执行前对相同分区和模式重新预检。施工任务在任何游戏派发前就与每日提案绑定，任务结束前持续检查前台、免打扰、撤权、暂停和到期。确认分区后可写入实际施工经历。整栋完成继续由原有整体验收确认。SQLite 保持 v43。
 - 隔离 DSH、Fabric、Carpet 和 CBI 使用确定性的原生模型协议夹具推进三个测试日。首日选择休息。第二日观察后加箱子，执行前复查拒绝派发，恢复现场后同日机会也不重开。第三日选择西翼，实际补两块云杉木板，核对分区 100 格、扣料及返回起点，偏差 0.086 格。主人另行确认整栋 200 格。冷重启保留分区和整栋回执，同日没有重跑。施工选择用了两次模型请求，HTTP 正文累计 13,027 字节。 [隔离验收](../.work/daily-house-project-0.111/run-_plvpptj/evidence.json) · [提案轨迹](../.work/daily-house-project-0.111/run-_plvpptj/model-trace.json)
-- 验收发现手机状态可见后台父任务关联。最终包在同一保存世界与数据库上冷升级，配对状态及实时活动仅保留已核验分区结果和扣料，私有任务关联留在宿主。包内 Worker、施工与调度逻辑与实地施工版本相同。46 项隔离验收、29 项浏览器检查、499 项定向回归、8 项配对投影检查及 TypeScript、构建和打包通过。正式服、真机和签名 APK 留到集中验收。 [包内差异](../.work/daily-house-project-0.111/run-_plvpptj/candidate-host.diff) · [浏览器验收](../.work/daily-house-project-0.111/browser/evidence.json) · [定向回归](../.work/daily-house-project-0.111/regression-final.log) · [配对检查](../.work/daily-house-project-0.111/paired-projection.log) · [候选包](../dsh-companion-bot-0.111.0.tgz) · [清理记录](../.work/daily-house-project-0.111/final-cleanup.json)
+- 验收发现手机状态可见后台父任务关联。最终包在同一保存世界与数据库上冷升级，配对状态及实时活动仅保留已核验分区结果和扣料，私有任务关联留在宿主。包内 Worker、施工与调度逻辑与实地施工版本相同。46 项隔离验收、29 项浏览器检查、499 项定向回归、8 项配对投影检查及 TypeScript、构建和打包通过。正式服、真机和签名 APK 留到集中验收。 [包内差异](../.work/daily-house-project-0.111/run-_plvpptj/candidate-host.diff) · [浏览器验收](../.work/daily-house-project-0.111/browser/evidence.json) · [定向回归](../.work/daily-house-project-0.111/regression-final.log) · [配对检查](../.work/daily-house-project-0.111/paired-projection.log) · [清理记录](../.work/daily-house-project-0.111/final-cleanup.json)
 
 ## 141. Companion 0.112.0 自主施工复盘
 
@@ -2007,7 +2007,7 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - Minecraft 工作台的「分段建筑」可以粘贴整栋 JSON，含 `width`、`depth`、`height` 和 `blocks`。整栋以授权区中心为水平参考，底层与授权区中心同高。方块从底层开始，每层从北到南、每行从西到东。留空用 `.`，橡木木板、云杉木板、圆石、玻璃分别用 `o`、`s`、`c`、`g`。工作台附四合院示例并保留手动分段入口。
 - 蓝图输入上限为 750 格，其中 101～600 个实体方块。宿主搜索最少的有效轴向分段，保留所有方块与留空，最多 6 段，每段最多 5×5×5 格、100 个实体方块。分段放置和走位区域都必须处于同一授权区内。无法满足这些条件的蓝图会返回原因。分段与用料统计在宿主本地完成，无模型调用。
 - 「预览自动分段」只检查蓝图和当前授权，可离线使用。预览后保存精确的分段结果，保存时重新检查授权。开工继续走各段的现场预检及确认，最后独立验收整栋。SQLite 保持 v43，Worker、CBI、安卓及配对协议沿用现有版本。
-- 48 项导入检查和 251 项相关回归通过。15×10×4 混合材料蓝图拆为六段，重组后保留 600 个实体方块。对 1,250 个有效随机输入进行压力检查，357 份有效分段逐格重组一致。390px 和 320px Chromium 通过 57 项检查，包括四合院四段预览、精确保存和撤权处理。最终候选通过 TypeScript、构建、打包及 11 项真实 DSH 安装检查。 [导入检查](../.work/house-import-checks-0.113/regression.log) · [相关回归](../.work/house-import-0.113/regression.log) · [压力检查](../.work/house-import-checks-0.113/stress.json) · [浏览器验收](../.work/house-import-ui-0.113/evidence.json) · [候选包验收](../.work/house-import-0.113/package-smoke.json) · [宿主候选包](../dsh-companion-bot-0.113.0.tgz)
+- 48 项导入检查和 251 项相关回归通过。15×10×4 混合材料蓝图拆为六段，重组后保留 600 个实体方块。对 1,250 个有效随机输入进行压力检查，357 份有效分段逐格重组一致。390px 和 320px Chromium 通过 57 项检查，包括四合院四段预览、精确保存和撤权处理。最终候选通过 TypeScript、构建、打包及 11 项真实 DSH 安装检查。 [导入检查](../.work/house-import-checks-0.113/regression.log) · [相关回归](../.work/house-import-0.113/regression.log) · [压力检查](../.work/house-import-checks-0.113/stress.json) · [浏览器验收](../.work/house-import-ui-0.113/evidence.json) · [候选包验收](../.work/house-import-0.113/package-smoke.json)
 - 隔离 Fabric、Carpet 和 CBI 将 15×5×4 的整栋院落导入成三段。在生存模式每段实放 54 块，三段均在返程触发 `homebuild-off-course`。测试在预检前为角色定位，按中断恢复流程复查原有方块，每段以 100 格、零新增和零耗材确认。整栋独立回读与宿主验收均核对 300 格，包括 162 个实体方块和 138 处留空。向留空放入箱子可定位到对应分区，移除后再次通过。初次与接续分别通过 18 项和 14 项现场检查，重启后旧开工凭据失效。持续自行返程及跨区就位仍待验收。隔离副本已清理约 252 MB，原始输入哈希一致。 [初次实放](../.work/house-import-fabric-0.113/run.n5vUdojp/acceptance.log) · [接续与整体验收](../.work/house-import-fabric-0.113/run.n5vUdojp/resume-evidence.json) · [清理记录](../.work/house-import-fabric-0.113/run.n5vUdojp/cleanup.json)
 
 ## 143. Companion 0.114.0 Minecraft 施工返程
@@ -2016,7 +2016,7 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - Worker 为普通施工增加与续建相同的独立起点和返程读取。无法确认位置时不记完工，分区仍可经重新预检恢复。方块、留空和材料继续独立核对，SQLite 保持 v43。
 - 旧逻辑在同一隔离院落的中段实放 54 块后，从 y=81 跨到 y=80 的普通台阶时走到 1.256 格，超过该步 1.22 格的前向边界。独立回读确认 100 格和扣料，宿主没有记录完工。 [旧版诊断](../.work/house-retreat-live-0.114/run.baseline.ugOwisy2/fabric.log)
 - 新版在隔离 Fabric 完成同一座三段院落。三次普通施工各实放 54 块并返程，终点距各自起点 0.085、0.095 和 0.057 格。测试提供材料、选择并确认工段，通过原有 CBI 导航指令完成两次跨段走位，初始定位后无传送。整栋独立回读和宿主验收核对 300 格，现场改动能定位到对应分区。宿主冷重启保留回执，旧开工凭据被拒绝。 [完整隔离验收](../.work/house-retreat-live-0.114/run.candidate.3Txjjk7b/evidence.json)
-- 43 项整栋现场验收、21 项旧版对照、19 项独立导航检查、191 项宿主和 Worker 回归及 220 项 Java 检查通过。通过 TypeScript、构建和打包。清理约 1.12 GB 的测试副本及构建缓存，原始世界和种子库哈希一致。正式服、真机和签名 APK 留到集中验收。 [验收与清理汇总](../.work/house-retreat-live-0.114/summary.json) · [宿主候选包](../dsh-companion-bot-0.114.0.tgz) · [配套 CBI](../.work/house-retreat-0.114/carpetbaritoneintegration-v1.7.1+260820-retreat-0.114.jar) · [CBI 源码与许可](../.work/house-retreat-0.114/CarpetBaritoneIntegration-retreat-0.114-source.tar.gz) · [定向回归](../.work/house-retreat-0.114/host-regression.log) · [Java 检查](../.work/house-retreat-0.114/java-tests.json)
+- 43 项整栋现场验收、21 项旧版对照、19 项独立导航检查、191 项宿主和 Worker 回归及 220 项 Java 检查通过。通过 TypeScript、构建和打包。清理约 1.12 GB 的测试副本及构建缓存，原始世界和种子库哈希一致。正式服、真机和签名 APK 留到集中验收。 [验收与清理汇总](../.work/house-retreat-live-0.114/summary.json) · [配套 CBI](../.work/house-retreat-0.114/carpetbaritoneintegration-v1.7.1+260820-retreat-0.114.jar) · [CBI 源码与许可](../.work/house-retreat-0.114/CarpetBaritoneIntegration-retreat-0.114-source.tar.gz) · [定向回归](../.work/house-retreat-0.114/host-regression.log) · [Java 检查](../.work/house-retreat-0.114/java-tests.json)
 
 ## 144. Companion 0.115.0 Minecraft 建筑备料
 
@@ -2035,7 +2035,7 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - 4 组端到端测试通过，覆盖 v43 升级、验收前拒绝、命名冲突、同名去重、改名修订、冷重启、归档、撤权、游戏根会话、真实 HTTP 管理鉴权和另一聊天场景的中央记忆注入。145 项相关宿主、Worker、建筑、World、记忆与配对回归通过。 [测试](../scripts/minecraft-places.test.mjs) · [回归记录](../.work/minecraft-place-ui-0.116/regression.log)
 - 内置 Chromium 实际操作了命名、改名和重名提示，并检查未完工项目无表单、撤权项目只读，以及 Worker 离线时仍可保存已验收工程的元数据。未重新测量窄屏布局。 [浏览器记录](../.work/minecraft-place-ui-0.116/browser.json)
 - 本轮未在真实 Fabric／Coopcraft 执行命名，未部署正式宿主、替换 CBI 或验收手机应用。`scripts/minecraft-milestones.test.mjs:97` 的旧数组断言与现有对象返回接口不一致，沿用上版记录，未纳入本功能改动。
-- 最终候选包为 `dsh-companion-bot-0.116.0.tgz`，SHA-256：`f9ed18c2e5b888e2bc09020cc79dec6154553980c6486bdb020dd6a8ac959faf`。`pnpm pack` 的宿主类型检查、构建、移动端类型检查及包内版本、地点迁移、工具与说明核对通过。 [候选包](../dsh-companion-bot-0.116.0.tgz) · [打包记录](../.work/minecraft-place-ui-0.116/pack.log)
+- 最终候选包为 `dsh-companion-bot-0.116.0.tgz`，SHA-256：`f9ed18c2e5b888e2bc09020cc79dec6154553980c6486bdb020dd6a8ac959faf`。`pnpm pack` 的宿主类型检查、构建、移动端类型检查及包内版本、地点迁移、工具与说明核对通过。  · [打包记录](../.work/minecraft-place-ui-0.116/pack.log)
 
 ## 146. Companion 0.117.0 OVO 生存技能
 
@@ -2045,11 +2045,11 @@ DSH Go 开发版可在已完成的助手消息下选择参考音色、开心或�
 - 宿主独立校验物品、数量、授权坐标和回执差值，统一 `overworld` 与 `minecraft:overworld` 命名。仅当前 Minecraft 根会话可调用；子代理、普通聊天和撤权区域不能使用。实际成功动作写入共享记忆，投料与取出分别记录，配对端不接触 Worker 令牌、微软会话或原始凭据。SQLite 保持 v44。
 - 隔离原版 1.21.1 平坦生存服完成存 4 取 2 木板、投入 1 份沙子并取出 1 块玻璃，覆盖背包和箱子双向差值、未投料不能取成品、区外容器与命令拦截，协议错误数组为空。636 项相关回归通过，包含宿主、Worker、World、记忆、建筑、迁移与配对检查。 [实测证据](../.work/ovo-live-0.117/evidence.json) · [回归记录](../.work/ovo-live-0.117/regression.log) · [定向测试](../scripts/minecraft-ovo.test.mjs)
 - 本候选未在正式 Coopcraft 验收，未替换正式宿主或手机应用，未启用自动采集、无限续跑或完整生存模式。启用时需要独立正版账号及白名单，不将 `online-mode` 改为 false，不绕过正版验证。Worker 与生产依赖需一起更新，可在隔离目标目录运行 `pnpm --filter @companion/minecraft-worker deploy --legacy --prod <private-worker-dir>`，不要只替换旧 JS。实际账号与正式服联调仍未进行。
-- 最终候选包为 `dsh-companion-bot-0.117.0.tgz`，SHA-256：`0f869c05823a712445c6aa85f7c56a97dbbc5bf72b0ef874f6bc4a61d25db7de`。`pnpm pack` 的类型检查、构建、移动端检查及包内工具、Worker 路由、版本核对通过。隔离 Worker 部署目录使用 `mineflayer 4.39.0` 与 `minecraft-data 3.116.0`，编译后 Worker 语法检查通过。 [候选包](../dsh-companion-bot-0.117.0.tgz) · [打包记录](../.work/ovo-live-0.117/pack.log)
+- 最终候选包为 `dsh-companion-bot-0.117.0.tgz`，SHA-256：`0f869c05823a712445c6aa85f7c56a97dbbc5bf72b0ef874f6bc4a61d25db7de`。`pnpm pack` 的类型检查、构建、移动端检查及包内工具、Worker 路由、版本核对通过。隔离 Worker 部署目录使用 `mineflayer 4.39.0` 与 `minecraft-data 3.116.0`，编译后 Worker 语法检查通过。  · [打包记录](../.work/ovo-live-0.117/pack.log)
 
 ## 147. Companion 0.118.0 正式联调与回环测试支持
 
-- `minecraftOffline` 默认关闭，供启用 OVO 的回环隔离服使用。正式 Coopcraft 的 0.118.0 状态快照记录了 Carpet＋CBI 上线、受控移动和实际回复生成的语音。正式状态以集中联调期间的留存结果为准。 [候选包](../dsh-companion-bot-0.118.0.tgz)
+- `minecraftOffline` 默认关闭，供启用 OVO 的回环隔离服使用。正式 Coopcraft 的 0.118.0 状态快照记录了 Carpet＋CBI 上线、受控移动和实际回复生成的语音。正式状态以集中联调期间的留存结果为准。 [候选包](https://github.com/ThySummer14/whale-companion-backup/releases/download/backup-2026-11-12/dsh-companion-bot-0.118.0.tgz)
 - 使用同一份 0.118.0 安装包和 0.114 配套 CBI，在独立 DSH、Fabric 和 Carpet 上验收三个模拟日。首日观察后少一根原木，重新预检取消行动。次日消耗 1 根云杉原木，产出 4 块云杉木板，保留 2 根原木，工程回执仍为待续建。第三日从已核验的备料事实继续原目标，实际消耗其中 2 块木板，恢复西翼并回到距起点 0.086 格的位置。整栋独立核对 200 格，另由主人确认验收。决策采用确定性回环夹具，游戏动作和库存为实测。 [35 项隔离验收](../.work/house-supply-live-0.118/run-ea1b0lc9/evidence.json)
 - 配对状态核对了简短的备料回执，私有日常会话请求返回 403。冷重启后备料和续建回执保留，SQLite v44 完整性检查通过。365 项定向回归通过，包括按当前返回结构核对自主证据列表。隔离副本和临时配置清理约 247 MB。 [定向回归](../.work/house-supply-live-0.118/regression.log) · [清理记录](../.work/house-supply-live-0.118/run-ea1b0lc9/cleanup.json)
 
@@ -2151,9 +2151,204 @@ dsh-litematica --json export blueprint.json --out house.litematic
 - Agent 工具 `companion_ocr(mediaId, purpose?)`：读媒体库真实资产逐页识别，私有评估场景禁用；设备路由 `POST ocr` 支持 raw image/pdf body 与 JSON mediaId 两分支。
 - 4 项 provider 测试（multipart/前导换行、in-body error、状态映射、尺寸/页数校验）+ 设备回归全绿；正式机用真实舞台截图验收：中文与界面文字逐字识别（含「空城计（大肥鱼翻唱）」），验收临时设备已撤销。
 
-## 160. Companion 0.128.0 受控传送与建造期创造（实测待专服启动）
+## 160. Companion 0.128.0 受控传送与建造期创造
 
-- 新增 worker `/api/teleport`（overworld only、tp 后位置读回 ±0.5 确认）与 `/api/gamemode`（playerGameType 读回确认）；宿主 `mc_teleport` / `mc_gamemode` 工具与主人级管理路由 `minecraft/connect|teleport|gamemode`。创造仅在有已授权地块的草案或建造进行中时放行（`creativeBuildAllowed`），建造结算后自动回生存。
-- 房屋草案 schema 扩展（樱花材料/12 边/400 块）本轮尝试后回滚：22 项分区/恢复契约测试钉死旧上限，需独立任务统一改写；当前仍为 5×5×5/100 块/4 材料，**容纳不下视频里 7×9 两层樱花茶肆**，列为后续任务。
-- 实测状态：代码已部署、门控 403 正确；但专服进程当前未运行（connect console 读回超时），且旧 worker 进程占用端口导致新路由 404。需启动专服并重拉 worker 后复测传送/创造/建造。
+- 新增 worker `/api/teleport`（overworld only、tp 后位置读回 ±0.5 确认）与 `/api/gamemode`（playerGameType 读回确认）；宿主 `mc_teleport` / `mc_gamemode` 工具与主人级管理路由 `minecraft/connect|teleport|gamemode`。创造仅在有已授权地块的草案、未完工工程或建造进行中时放行（`creativeBuildAllowed`），单屋和分段工程结算后均自动回生存。
+- 房屋草案已扩展为 64 边、20,000 实心块和 10 种材料（含樱花木、粉混凝土、平滑砂岩、深橡、灯笼与樱花树叶）。整栋导入仍保留 750 格的分区格式边界；分段工程现最多 8 段，SQLite 升级至 v45。
+- 正式 Coopcraft 已实测进服、传送到主人离服坐标和创造切换。Worker 的 `/api/api` 路径重复已修复；CBI、Worker 与回执契约的创造建造配套在后续实测中继续完善。
 - 蓝图视频理解已验通：qwen3.8-omni 对 BV1bbGgz4EZk 逐 12 秒窗口输出结构描述（7x9 樱花地基→粉柱→二层浅黄平台→深褐屋顶+灯笼）；clip 预算为每分钟限流，间隔 65s 可续采。
+
+## 161. Companion 0.128.0 全程自主建造与正式双层茶肆
+
+- 参考 DeepseekOVO 的直接生成方式，新增 Worker `/house/creative-build`：创造模式下按楼层与灯笼依赖顺序逐格写入并回读，已正确的方块跳过，樱花树叶使用 `persistent=true` 避免衰减。无需逐段人工预检或站位审批，仍保留实际方块和最终整栋核验。
+- 新增 `POST minecraft/house-projects/:id/auto-build`：一次授权创建全程父任务，跳过已建成段，自动完成剩余分段并恢复生存。外层父任务豁免自身 `worldBusy`，其他并发施工仍被拒绝。旧的手动分段预检、生存施工和恢复路径保持可用。
+- 正式 Coopcraft 在主人当前位置附近 `(5942,65,-75)` 完成简化项目 `309dafbd-97c0-42c9-86e7-a06a3ecd7504`。一次 `auto-build` 完成全部 8 段，整体验收 504/504 格匹配；角色随后被安置到一楼中心 `(5942.5,66,-74.5)` 并恢复生存、空库存。该验收只证明符合简化蓝图，不代表视频中的完整茶肆，后续需按完整教程重建。
+- 98 项建筑与自主流程测试及 TypeScript 检查通过，包含直接生成顺序、树叶持久化、全程任务、地基适配、创造回执与独立整栋验收。
+
+## 162. Companion 0.128.0 Docker 控制台修复与 Windows 客户端 YSM
+
+- 正式服继续由 mini 的 Docker 容器 `coopcraft-ysm` 承载，沿用原世界、端口和备份；Docker 只提供 YSM 所需的 Linux 环境，Windows 客户端不需要 Docker。启动脚本末尾的 `docker start -a` 已改为从 `/dev/null` 读取标准输入，避免与 Docker `exec` 转发器竞争读取 Companion FIFO。旧启动器遗留的 `tail -f console.in` 已停止，Worker 的全部建造能力恢复在线。
+- 日志游标统一按 UTF-8 字节计算，避免中文日志导致重复处理旧上线／离线事件。回执超时时保留有界诊断；整栋快照读取等待为 30 秒，总核验上限为 120 秒。最新 101 项定向测试、宿主和移动端类型检查、`pnpm pack` 均通过。
+- `309dafbd-97c0-42c9-86e7-a06a3ecd7504` 在 2026-11-15T10:24:49Z 再次通过完整 `auto-build` 验收：`matched=true`、`checked=504`、`unmatchedSections=[]`，8 个分区均为 `built`，没有重复施工。
+- 正式服已设置并重新推送 `D蓝色大肥鱼.ysm`、`white` 纹理、`mandatory=1b`、`disabled=0b`。实际游玩客户端是 Windows 上 PCL 的 `fabric-loader-0.20.1-1.21.1` 实例，不是本机 macOS 的 HMCL。该实例原有模组清单没有 YSM；`/ysm ping` 返回未翻译的 `message.yes_steve_model.client.ping_result`，与服务端代码及客户端资源缺失的判断一致。
+- 已向该 Windows 实例安装与服务端完全相同的 `ysm-2.6.5-fabric+mc1.21.1-release.jar`，SHA-256 为 `a66b7265a2761d639c48f61a64179206adf5d81c38f360763fc8275a0fec9fa5`，未改动其他模组或模型文件。随后在 Windows 日志确认 `yes_steve_model 2.6.5-fabric+mc1.21.1` 加载，用户实际进服确认大肥鱼皮肤显示成功。未转换模型格式，Windows 客户端不使用 Docker。
+
+## 163. Companion 0.128.0 完整视频重建与不限工程大小
+
+- 重新核对完整 65 分钟教程后，确认旧 9×7×8、327 实心块的项目只是错误简化，不是视频成品。视频包含三层外部、两层室内、门廊茶座、吧台、楼梯及庭院；主体用品红陶瓦、白桦／橡木、砖块与砖台阶，而非深色木板简单封顶。
+- 工程尺寸、实体数量、分段数、偏移量和授权区半径不再设人为上限。分段和分块回读只用于执行，不是主人需要审批的门槛。授权范围、备份、停止与真实回执继续保留，不把保守模型误当成不会误改的凭据。
+- 自主提案新增 `house:all`：她可以在同一授权工程中选择整栋续建，宿主创建 `minecraft.house-project.autonomous` 父任务，一次完成所有剩余分段并恢复生存，不再每天只建一段。旧的逐段接口仍兼容，不能把手动调用 `auto-build` 当作她自主决定。
+- SQLite 升至 v47：工程分段索引不再限制段数，改建标记持久化，区域半径不再保留旧 CHECK；迁移保留原工程、区域与外键，版本回滚但新列已存在时也能安全升级。
+- 新增 `1ae7efe2-d23b-4ef6-a364-cfebf762b1a9` 工程，按视频重建为 5712 格规划范围、1144 个实体方块，包含三层屋面、室内楼梯、门廊茶座、吧台和近处花园。重建前世界已备份至 `/Users/filisi/工作/会话/coopcraft/server/backups/world-trim-20261103-before-tea-rebuild-20261115`。
+- 489 项相关回归通过，覆盖自主整栋提案与父任务、真实方块状态、改建、2000 格分块回读、超八段冷启动和数据库迁移。另修正分层 Y 偏移、整栋回读超时、续建去重、历史授权查找及同一父任务被误判为前台占用的问题；显式续建不再误用后台空闲等待，新时段和跨日期均按工程记录续建，旧失败与取消记录保留。
+- 第一段已按真实 Y=65–72 完成 2856 格回读。应主人要求收工时，已停止自主续建并让角色安全下线，第二段中断，整栋尚未完成；免打扰恢复为 23:00–08:00。此项目是按视频主要结构重建，不是逐方块 1:1 还原；未取得 Windows 客户端实际画面，不能把工程创建、局部回执或蓝图匹配提前视为视频重建完成。
+
+## 164. Minecraft 建筑回执进入手机活动
+
+- 安卓首页最近活动和 Minecraft 活动筛选复用同一张回执卡。分区显示核对范围和本次实际放置，整栋验收显示核对的方块及留空，复查不符时显示需要续建的分区数。旧回执没有工程名时使用相应的结果标签。
+- 配对状态和实时活动复用同一投影。手机端保留已验证的计数、可显示的工程名和回执数据，日常父任务的内部关联留在宿主，同一次整栋验收在手机上显示一条。整栋通过时，原有共享记忆记录工程名和当次核验范围，独立手机会话可以按工程名召回经历。
+- 定向检查覆盖已配对的 HTTP 状态与 WebSocket 回执、旧版事件、失败和重复回执过滤、安卓回执卡，以及按工程名召回。调试 App 连上现有宿主后，Minecraft 活动页显示了旧版的单分区待续建回执。新版宿主和安卓真机仍待联调。
+
+## 165. 手机查看跨日建筑工程进度
+
+配对安卓在「活动 → Minecraft → 建筑工程」查看最新工程的已核对段数和当前施工状态。展开工程可看上次整栋复查时间、结果与各段回执。分区全部核对后，App 根据最新整栋复查显示「等待整栋复查」或「整栋已验收」。旧的复查差异按当次结果显示，施工事件滚出活动列表后仍可查阅进度。
+
+宿主从已授权地块的工程记录提供最近 40 个摘要。分区明细在展开时按需读取，每页 32 段。工程进度为已配对设备的只读入口，地块撤权后会随同步收起。连接旧宿主时，原有活动回执仍可查看。
+
+宿主 10 项、Flutter 活动页 6 项定向检查通过，宿主类型检查、构建和安卓离线增量构建通过。Android ARM64 模拟器配对隔离宿主后，展开可查看两段施工回执与上次复查差异。更新隔离工程样例并刷新后，2/2 段从等待复查变为整栋已验收，显示核对 120 处。正式 Mac mini 和安卓真机仍待联调。
+
+## 166. 整栋建筑验收进入私有动态
+
+启用后台自主任务、自主动态、Minecraft 经历分享和已验收成果来源后，大肥鱼可以选择是否把完成的建筑工程写成私有动态。宿主交叉核对地块授权、分区回执累计、成功的整栋验收任务及最新复查结果。每个工程只有一次分享评估机会，沿用免打扰、发布间隔和 24 小时时限。复查不符或地块撤权后，待发布的结果会在写入前被拦下。
+
+正文包含宿主核对过的分区和位置计数，以及大肥鱼的一句感想。工程名、坐标、蓝图和内部编号留在宿主。配对手机可以在这条动态下提问。回应使用独立的动态会话，读取原帖和当前评论，发布的经历按验收任务保留来源。
+
+隔离联调在宿主走完两分区施工与整栋核对，再经实际配对 HTTP 接口读取动态、提交评论并读回回应。Worker 和模型使用确定性夹具。定向检查还验证了重复复查去重，以及新复查不符时中止旧分享。正式 Minecraft 服务端、实际模型和安卓真机列入集中验收。
+
+## 167. 动态回应接续共享记忆
+
+配对端发表动态或评论后，大肥鱼会结合当前互动与原帖，在新建的私有回应 Session 中引用最多两条相关的活跃共享记忆，每条事实正文限 260 字符。任务保留当次采用的记忆出处，配对接口交付原帖与可见回复。
+
+宿主在模型调用前和回复写入前核对记忆的当前内容和共享权限。纠正、转为场景私有或遗忘会撤销仍在评估的旧草稿，仍然有效的评论按回复节律重新评估。
+
+隔离 DSH 安装本地候选包后，使用真实配对 HTTP 与回环模型端通过 11 项联调核对。第一次回复接上了手机场景已共享的约定。同一线程的下一轮草稿生成期间纠正了约定，旧草稿被拦下，重试只收到纠正后的事实。三个模型请求分别对应三次评估，均为无工具的单次调用，配对端收到纠正后的回应。正式 Mac mini、实际模型和安卓真机待集中联调。 [隔离验收](../.work/feed-memory-dsh.HJOfoh/evidence.json)
+
+## 168. B 站共看回执与共享经历
+
+从配对手机的「看视频」发出片段后，首页在等待音视频取样与回应期间显示浏览状态。成功回执包含标题、分 P、起点、长度和素材类型。可从首页最近活动或「活动 → B 站」打开回执，并在 B 站跳转到原片段。同一配对设备在会话有效期内返回时，会恢复最近两轮问答，追问复用已解码片段。十分钟未收到新回复会释放对应缓存，宿主重启也会结束短时会话。活动保留范围内的回执仍可打开出处或重新发起共看。
+
+主人点「存为共享经历」后，中央记忆保存带回执来源的片段事实，手机聊天可以按标题接上。问答和片段媒体仅在共看会话内使用。重复保存复用同一条记忆，已撤回、归档或转为私有的记忆不会由旧回执再次建立。SQLite 沿用现有表，配对活动保留旧版客户端识别的事件类型。
+
+安装本地候选包的隔离 DSH 通过 15 项联调核对。B 站响应与模型端使用隔离夹具，FFmpeg 实际按范围解码了分 P 片段。两次共看模型请求复用一次取样，独立手机 Session 召回了经主人保存的来源，重启后保留回执和共享记录。宿主 107 项定向检查、类型检查和构建通过。Flutter 定向交互、Dart 分析、双语文案生成和安卓离线增量构建通过。正式 Mac mini、真实 B 站视频与千问、安卓真机仍待联调。 [隔离验收](../.work/bili-watch-continuity.kky5YM/evidence.json)
+
+## 169. 正式 Coopcraft 创造续建樱染茶肆
+
+在主世界 `(5942, 65, -75)` 延续原有地块和建筑，修正旧蓝图漏导出的三楼屋面与檐口。施工前已刷新世界存档，备份覆盖茶肆的区块文件及其实体和兴趣点数据。旧工程与失败记录保留，修正工程为 `cb2db33f-8aec-4f51-ab47-29d8436e002c`。
+
+首次恢复时现场区块尚未就绪，整栋复查超时，原空闲活动提示又让下一轮将施工暂存。恢复入口现以当前有效的整栋授权为准，把主人的明确建造委托交给独立活动 Session。它仍须通过原生工具提交选项并取得真实回执。本地 Worker 候选另外加入一次身份与区块探测重试，复查保持全部方块与留空范围。恢复入口在正式 Mac mini 做了定向更新，并保留可回退的旧模块。Worker 重试仅完成了本地定向验证。
+
+大肥鱼用原生工具选择了 `house:all`，创造模式施工任务 `97151fc3-a175-4959-b1a6-a11044f803ee` 成功。2026 年 11 月 18 日 14:40，三段全部核对，`6,069` 处方块及留空均匹配。已正确的一层、门廊和茶座未重复放置。本轮补了上层与内饰的 83 块以及顶层屋面与檐口的 55 块。独立读取正式世界保存的区块，再次核对全部 6,069 处并确认共 1,199 个实体方块。中央记忆保留了指向整栋验收的共享经历。 [施工回执](../.work/tea-house-live.MguNwc/progress.jsonl) · [存档核对](../.work/tea-house-live.MguNwc/saved-world.json) · [存档渲染](../.work/tea-house-live.MguNwc/tea-house-as-built.png)
+
+整栋验收后大肥鱼已恢复生存模式。14:55 的服务端记录显示她在原地遭僵尸击杀并下线。后续存档核对确认建筑仍完整，临时施工授权已清除。成品按教程主要结构重建，本次画面由正式存档的方块渲染，Windows 客户端内的光影和室内动线留待实地检查。
+
+## 170. Coopcraft 角色外观与 macOS 原生候选
+
+正式服已将 `thyysummer` 的 YSM 模型禁用，并从玩家存档回读。大肥鱼的存档仍启用 `D蓝色大肥鱼.ysm`、`white` 纹理及强制显示。Windows PCL 实例保存 `[extra_player_render].DisablePlayerRender = true`，在当前联机画面确认左上角的小人预览消失。其他玩家模型的渲染开关为启用。 [YSM 客户端配置](https://yesstevemodel.github.io/en/wiki/config/)
+
+本机 Apple Silicon 以原生 Java 21 启动 Fabric 0.20.1／Minecraft 1.21.1、Carpet 和 Better Player Model 1.1.5。隔离服务端把与正式服 SHA-256 相同的模型登记为 `dafeiyu-blue`，为真实 Carpet 假人设置并回读 `white` 纹理和启用状态。独立原生客户端联机后从服务端下载了该模型，日志确认模型已构建并加入渲染队列。客户端画面、正式 Mac mini 的完整模组组合同 Windows PCL 切换仍待验收。 [隔离回执](../.work/native-dafeiyu-model.RNw0g4/evidence.json) · [Better Player Model 1.1.5](https://github.com/Zhop0rez/BetterPlayerModel/releases/tag/v1.1.5_%281.21.1%29)
+
+Bot 衣柜先读取 YSM 的已有状态，服务端确认对应 NBT 路径不存在时，读取 Better Player Model 的 `cardinal_components."better_player_model:model_info".ModelInfo`。两者沿用同一允许列表、选择命令和真实回读。12 项衣柜定向检查、类型检查及构建通过。原生候选的服务端和观察客户端需要使用 Better Player Model 的同步协议，衣柜配置需要使用该模组登记的模型 ID。正式服继续用已验过的容器和 Windows YSM。
+
+## 171. 体素建筑导出与原生落地
+
+模型先设计形体、层次、色板和功能空间。体素稿把每格坐标和实际方块状态保存为一份文件，导出时保留楼梯方向、台阶类型等属性。Axiom 可用 `.schem` 预览、调整、复制和对称编辑，Minecraft 可用原生结构文件批量加载同一份设计。旧小屋的字符材料表和生存分段仍走原路径。旧版 Litematica 导出的方块朝向也修正为独立的 NBT 状态属性。 [Axiom 导入文档](https://axiomdocs.moulberry.com/editor/mainmenubar/file.html) · [Sponge Schematic v3](https://github.com/SpongePowered/Schematic-Specification/blob/master/versions/schematic-3.md)
+
+`dsh-litematica voxel` 读取版本 1 的 JSON。用 `size: [宽, 高, 深]` 给出坐标范围，用 `palette` 将名字或色值绑定到 Minecraft 方块状态，`voxels` 列出从 0 开始的 `[x, y, z, 色板键]`。重复坐标、越界坐标和未知色板键会中止导出。原生 `.nbt` 只写声明坐标，显式的 `minecraft:air` 代表清空。Sponge 图纸用空气表示未声明格，实际粘贴前应核对编辑器的空气设置。CLI 按 16 MiB 读入预算处理稀疏稿，Sponge 单文件最多 16 Mi 个包围盒网格；体积更大的文件需由编辑器或施工导入层切分。
+
+```sh
+dsh-litematica --json voxel blueprint.json
+dsh-litematica --json voxel blueprint.json --out observatory.schem
+dsh-litematica --json voxel blueprint.json --out observatory.nbt
+```
+
+原创程序化样例「潮汐观星门」占地宽 65、深 33、高 40 格。隔离 Fabric 1.21.1 世界加载原生结构后，从实际区块存档回读 14,320 处声明坐标，全部匹配，其中包含 14,319 块实体和 1 处显式空气。未声明格和包围盒之外的对照块都保留。独立读取 Sponge 文件的 85,800 个网格，全量匹配。WorldEdit 7.3.8 在另一处实际导入并粘贴同一个 `.schem`，区块存档的 14,320 处声明坐标和状态全量匹配。三个定向回归、TypeScript 类型检查和构建通过。 [体素源稿](../.work/minecraft-voxel-bridge.XRSJny/star-gate.voxels.json) · [存档渲染](../.work/minecraft-voxel-bridge.XRSJny/star-gate-preview.png) · [隔离回执](../.work/minecraft-voxel-bridge.XRSJny/evidence.json)
+
+2026 年 11 月 19 日在 Apple Silicon 的独立 Fabric 1.21.1 单人创造存档 `Axiom - Tidal Stargate` 完成 Axiom 6.1.5 实测。用 `File → Import Schematic` 导入同一份 Sponge v3 文件，生成放置预览并确认。保存后从原点 `(21, -61, 30)` 回读包围盒内的 85,800 格，14,319 块实体及全部留空均匹配。工作台用 `F8` 打开编辑器，`V` 预览，`Enter` 确认。 [工作台](<../.work/axiom-fabric-1.21.1.cfbMoz/Axiom Workshop.app>) · [成品实拍](../.work/axiom-fabric-1.21.1.cfbMoz/game/screenshots/2026-11-19_12.44.36.png) · [存档回执](../.work/axiom-fabric-1.21.1.cfbMoz/placement-evidence.json)
+
+这次底座落在草皮层，Axiom 把图纸底部的留空也写入世界，边缘露出泥土。原生结构能保留未声明位置，适合供 Bot 按授权落地。角色会话生成设计和正式 Coopcraft 接入仍待联调。后续跨设备优先使用 Tailscale 上可用的命令行与文件通道，图形验收可以在本地工作台完成。
+
+`dsh-litematica vox` 直接读取单模型 MagicaVoxel `.vox`，按体素坐标 1:1 导出 Sponge v3。自动色板将 RGB 映射至原版整块方块，`--palette` 可传入 `{"#rrggbb":"minecraft:block"}` 覆盖。默认将体素的高度轴转换为 Minecraft 高度轴，并反转深度轴。原作者导出器已按 Minecraft 正 Z 保存深度时使用 `--depth-as-z`。含多模型或场景变换的文件须先合并烘焙后导出。 [MagicaVoxel 格式](https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt)
+
+```sh
+dsh-litematica --json vox tideborn.vox --depth-as-z --palette palette.json --out tideborn.schem
+```
+
+用用户的成品《潮生》验证了整座山城。图纸占地 239 × 199 格，高 124 格，将源稿 245 种使用色映射到 38 种方块状态。WorldEdit 7.3.8 在 Minecraft 1.21.1 隔离创造存档用 `//paste -a` 放在 `(0, -60, 0)`。分别解码图纸和关闭后的区块存档，各核对 5,897,564 格，749,430 块方块与全部留空匹配。海面用染色玻璃，窗户与灯塔用原版发光方块，作为静态作品保留海面与灯光的造型。测试存档副本已放进 Axiom Workshop 的单人存档列表「潮生 · TIDEBORN」。 [图纸](../.work/tideborn-minecraft.tGBy1I/tideborn.schem) · [存档渲染](../.work/tideborn-minecraft.tGBy1I/tideborn-world-preview.png) · [创造模式存档](../.work/tideborn-minecraft.tGBy1I/tideborn-creative-world.zip) · [逐格验收](../.work/tideborn-minecraft.tGBy1I/evidence.json)
+
+## 172. 配对手机体素蓝图确认
+
+在配对聊天附上一份 `.vox`，同一条消息说明要转换成 Minecraft 蓝图。可以附一份 `{"#rrggbb":"minecraft:block"}` 格式的 JSON 色板。源文件已按 Minecraft 正 Z 记录深度时，在请求里注明「深度轴用正 Z」。大肥鱼的工具在这一轮读取主人上传的文件，宿主用独立进程生成同一版 `.schem` 和等轴预览。图纸档案登记原附件、转换任务、文件哈希和材质统计。SQLite 升至 v48。
+
+手机「活动 → 建筑审批」显示预览、宽高深和实际方块数，可以保存 Axiom 图纸、确认这一版或撤回确认。确认请求绑定图纸 SHA-256，保存的审批记录仅用于本版图纸的审阅。地块授予、创造施工、暂停和完工回执需要与受限批量施工链路联调。
+
+隔离 DSH `0.2.1-rc.5` 用本地模型夹具触发了真实聊天工具。通过配对 API 上传完整《潮生》和专用色板，得到 749,430 块方块和 38 种方块状态。导出的 50,507 字节逐字节匹配第 171 节已落地验收的图纸，预览为 39,093 字节。旧轮附件无法触发工具，未配对下载和错版确认被拒绝，重复确认保留第一次时间，撤回和重新确认都有记录。重启后同一配对设备可读取原图纸和确认状态，数据库完整性与外键核验通过。Flutter 活动页、配对客户端和预览确认交互通过定向验证，安卓真机与正式 Mac mini 待集中验收。 [手机预览](../.work/tideborn-paired.4Isi5d/tideborn-phone-preview.png) · [配对链路回执](../.work/tideborn-paired.4Isi5d/evidence.json)
+
+## 173. 授权区体素施工、暂停与续建
+
+本机候选使用 Java 21、Fabric 1.21.1、Carpet 和 `companion_blueprints` 服务端模块。用 `gradle -p apps/minecraft-blueprint-fabric build` 构建模块。施工入口通过宿主 `minecraftVoxelBuilding` 配置单独启用，默认关闭，图纸预览和导出可独立使用。Fabric 服务端与 CBI Worker 通过本机控制台和配置的 Minecraft 服务目录交换已核对的 `.schem`，客户端沿用现有连接方式。 [模块源码](../apps/minecraft-blueprint-fabric/) · [隔离验收使用的 JAR](../apps/minecraft-blueprint-fabric/build/libs/companion-blueprint-fabric-1.0.0.jar)
+
+先在工作台授权一块覆盖完整图纸的地块。手机在「活动 → 建筑审批」确认图纸后，选择地块并点「预检地块」，核对维度与坐标后点「确认创造施工」。预检凭证有效两分钟，绑定地块、配对设备、图纸 SHA-256 和确认时间。预检读取整块场地，区块须已加载，场内须无人。如果遇到冲突，服务端停止写入并保留原方块。施工只向蓝图的实体目标格补入允许的原版方块，已有匹配格直接计入进度，留空格需要保持为空。服务端在每个 tick 的限定时间内处理一部分格子，期间大肥鱼处于创造模式，结束或收到停止指令后恢复原模式。配对暂停、撤回图纸确认、设备撤销与地块撤销都会撤掉施工许可。已开始的施工绑定原地块，从中断恢复需重新预检和确认。
+
+同一份《潮生》先在隔离服验证现场冲突会阻止开工，再确认手机能在已放 10,435 块时暂停、停稳并恢复生存模式。一次后续施工遇到服务进程中断，重启后从原存档识别出 20,958 块已经匹配，只补入 728,472 块。完工后从关闭的区块文件独立比对 5,897,564 格，749,430 块方块和 5,148,134 处留空全部匹配，包围盒外的对照方块仍在。重复提交返回原完工回执，宿主重启后手机仍可核对回执。整体验收记录来源任务、坐标、图纸版本，并写入一条带出处的共享经历。SQLite 升至 v49。安卓真机与正式 Coopcraft 的实际组合待验。 [停稳与完工回执](../.work/tideborn-built.0H7Uqn/evidence.json)
+
+## 174. 体素完工活动与跨场景召回
+
+配对 App 的「活动 → Minecraft」显示已核验的建筑名、施工区、维度、蓝图起点、实体方块和留空数量。宿主为配对状态和 WebSocket 共用同一份回执校验，核对施工任务、地块、图纸校验值和服务端核验结果。工作台的通用事件接口拒绝写入体素完工回执。
+
+新完工的共享经历一并保存坐标和回执编号。旧经历沿用原文和来源引用，在宿主仍保有对应活动且原文匹配时补充坐标。主人可以纠正经历或收回共享。在本地 DSH `0.2.1-rc.5` 中复用第 173 节的数据库，使用新的配对设备开独立 `chat.mobile` 会话。模型夹具实际收到《潮生》的主世界起点 `(0, -60, 0)`、749,430 块方块、5,148,134 处留空及回执 `#55`，并从常规聊天返回答复。收回跨场景共享后，同一聊天下轮停止自动召回，完工活动仍可读取。期间沿用已落盘的原始施工证据。 [配对回执与召回验收](../.work/tideborn-recall.8RTlCB/evidence.json)
+
+宿主类型检查、构建、记忆与设备定向回归，以及 Flutter 活动页与中英文生成检查已通过。安卓真机、正式 Mac mini 和 Coopcraft 待联调。
+
+## 175. 正式 Coopcraft 潮灯港与现场勘看
+
+2026 年 11 月 19 日通过 Tailscale 读取主人的最后存档位置 `(5939, 66, -77)` 和樱染茶肆北岸地形。Codex 设计「潮灯港」体素稿并导出 Sponge v3 图纸，入口在 `(5938, 64, -82)`，包含接岸引桥、泊船支栈桥、防波堤、装卸棚和灯塔。引桥绕过已有树苗。主人确认保留这份外形较规整的设计作为测试样本。 [体素稿](../.work/harbor-coopcraft.O1Fzgx/north-quay.vox) · [图纸](../.work/harbor-coopcraft.O1Fzgx/north-quay.schem) · [预览](../.work/harbor-coopcraft.O1Fzgx/north-quay-preview.png)
+
+正式服先刷新存档并备份对应地形、实体和兴趣点文件。按同一份图纸解出的坐标，服务端分组写入 1,919 个目标格，只替换现场核对过的空气和水。存档回读确认全部 1,919 个目标和 5 个保留对照匹配，临时区块票据已释放。 [正式施工回执](../.work/harbor-coopcraft.O1Fzgx/formal-placement.jsonl)
+
+大肥鱼在原本的游戏会话使用生存模式勘看，完成一次真实寻路至西侧预留位。她结合现场和入夜时间，自己提出先做一根带灯笼的系缆桩，取名「潮灯桩」。本轮搭建的是港口主体，潮灯桩保留为她的下一步设计。勘看结束后恢复为进服前的离线状态。 [角色回复](../.work/harbor-coopcraft.O1Fzgx/role-evidence.jsonl) · [移动回执](../.work/harbor-coopcraft.O1Fzgx/role-movement.json)
+
+## 176. 正式 Coopcraft 潮阙港落地
+
+《潮阙港》选在潮灯港西侧外海，主世界蓝图原点 `(5040, 52, -304)`，对应海水方块层 Y=62。逐格预检了 572,049 个目标位置，现场均为空气、海水或水生植被。按主人要求直接施工并正常保存。Sponge v3 图纸按同一坐标切为 418 个原版结构模板，先建主体，再放梯子与灯笼。分批使用的临时区块票据已释放。
+
+首轮存档回读定位了 11 盏缺失的灯笼。正式服版把 10 处灯座改成上半砖，把阶梯旁的一盏移到邻格的磨制安山岩边沿。复验确认 572,049 个目标全部匹配，箱子和木桶有真实容器数据。主码头可站立位置为 `(5150, 68, -219)`，外港航道水面坐标为 `(5149, 63, -124)`。 [正式服适配图纸](../.work/tidegate-coopcraft.Htu3WJ/tidegate-coopcraft.schem) · [施工回执](../.work/tidegate-coopcraft.Htu3WJ/formal-progress.jsonl) · [最终存档核验](../.work/tidegate-coopcraft.Htu3WJ/final-progress.jsonl)
+
+## 177. 同一目标跨日接续
+
+自主规划和经历复盘读取与聊天、游戏共用的当前版本角色档案。她可以在 `daily_initiative_propose` 用 `keepGoalOpen` 表明所选行动是目标的一步。宿主在核验后的完成事务保存结果摘要，下一次 `daily_initiative_observe` 随待续目标提供最近一步的核验时间和结果。她可以在新的现场预检后接着做、暂存或放下。最后一步通过核验后结案，行动未获回执时保留先前确认的进度。
+
+沿用原有的每日一次授权窗口与首次立项目标起七天期限。B 站原资料撤回时，从待续目标里隐藏关联的结果摘要。目标和进度只在私有自主会话中提供，其他场景仍按各自权限读取已核验的经历。SQLite 继续读取原有载荷和旧目标记录。
+
+本机隔离 DSH 与 Fabric、Carpet、CBI 模拟三个日常窗口。首轮向东走 7 格并回营。重启宿主后，下一轮读到首次回执，接续同一目标，向南走 7 格并回营。第三轮观察确认目标已结案，未发出游戏行动。配对接口核验了私有目标隔离，共享记忆保留两条核验后的游戏经历。模型决定由本地夹具提供，正式宿主与线上模型待验收。454 项定向回归、宿主类型检查与构建通过。 [隔离验收](../.work/core-goal-continuity/acceptance.json) · [回归日志](../.work/core-goal-continuity/tests.log)
+
+## 178. 跟随到位后恢复平视
+
+正式 Coopcraft 联机时，大肥鱼跟随到距主人约两格并站稳，服务端连续三次仍读到 88.7° 的向下俯仰角。CBI 寻路写入玩家朝向，动作停下后角度保留在玩家身上，YSM 按这个姿态显示。现场重新设置视角后回读约为 −4.5°，角色继续在线。
+
+补丁基于正式服当前加载的 CBI 源码。普通跟随仍在进行、路径已结束且角色在目标范围内站稳时，将大于 45° 的向下俯仰复位到平视。游泳、使用物品、破坏方块和应急移动时，由对应动作控制视角。 [CBI 补丁](../patches/carpetbaritone-follow-view.patch)
+
+隔离 Fabric 实测从 90° 低头开始跟随，到位后回读 0°，原水平朝向保留。随后角色随目标移动约 7.7 格，再停稳仍能回到 0°。停止跟随后，手动低头保持 90°。188 项 Java 检查和离线构建通过。修复包保留为本地候选。 [隔离验收](../.work/cbi-follow-view.js9xPM/evidence.json)
+
+## 179. 精确移动的落脚点与失败回执
+
+正式服联机期间，三次「路径计算重试耗尽」分别对应泥土占用的脚格 `(5947, 65, -32)`、砖墙占用的脚格 `(5935, 65, -70)`，以及目标和脚下都是空气的 `(5935, 63, -82)`。这些方块已在运行中的世界核对。旧 Worker 在寻路已经结束却未到达时调用通用停止，取消了自己的动作，宿主因而把部分失败记成取消。
+
+沿用 DeepseekOVO 按玩家位置接近、按真实结果结算的做法，陪主人走路优先调用已有 CBI 跟随。指定精确脚格时，纯走路模式利用 CBI 的真实方块形状提前拒绝明确被占用或悬空的落脚点，返回具体原因与当前站位。寻路结束后复读位置，仍未到达时按失败结算。主人主动取消仍保留独立结果。 [DeepseekOVO 寻路参考](../建设bot参考/DeepseekOVO-公开版/src/agent/library/skills.js) · [CBI 落脚点补丁](../patches/carpetbaritone-move-standing-cell.patch)
+
+隔离 Fabric、Carpet、CBI 和真实 Worker HTTP 核验了脚格被泥土占用、头顶被砖占用和脚下悬空三种拒绝，均在提交寻路前返回。正常目标仍实际走到并读取脚格。38 项宿主与 Worker 检查、Java 检查和两端构建通过。CBI 候选包合并第 178 节的跟随视角修复，当前保留在本地。 [隔离验收](../.work/cbi-move-target.xXTEku/evidence.json)
+
+## 180. 床重生点、自动入睡与同睡提醒
+
+正式 Coopcraft 曾返回白天 `nightbed refused`，旧回执只检查是否入睡。原版床交互会先尝试设置重生点，然后按时间决定能否入睡。正式服也已回读到她实际保存的茶肆床重生点 `(5942, 66, -78)`。
+
+`mc_sleep` 继续使用正常生存交互，白天核对床头坐标和重生维度，入睡时核对实际睡眠位置。自动行为只在与在线主人同处主世界、附近有够得着的空床、她站稳且空闲或停稳跟随时触发。白天仅在没有已设重生点时自动使用床，明确选择另一张床仍可重新设点。夜里实际入睡后结束跟随。只有原版同睡人数仍不足且主人醒着，才发一次游戏内私聊。已提醒的世界日期随大肥鱼玩家数据保存。 [CBI 床交互补丁](../patches/carpetbaritone-bed-routine.patch)
+
+隔离 Fabric 通过真实 Worker 和联网 Minecraft 客户端核验。白天自动点床与手动换床都回读匹配重生坐标，睡眠计时为 0。两人在线、同睡比例为 100 时，大肥鱼先入睡并结束跟随，联网客户端只收到一条私聊，随后两人同睡进入清晨。比例改为 50 后，她独自入睡进入清晨。40 项宿主与 Worker 检查、188 项 Java 检查和两端构建通过。候选沿用抬头和落脚点修复，保留为本地配套包。 [隔离验收](../.work/cbi-bed-routine.7V0PId/evidence.json)
+
+## 181. 基础聊天续接与会话切换
+
+普通聊天发送和取消在恢复 DSH Agent 后核对当前场景绑定和 Agent 实例。恢复过程中场景换绑时，旧请求返回冲突，原会话与新会话均不执行该请求。绑定有效的新请求会正常处理。配对重试与后台决策沿用各自的冲突回执。
+
+本地隔离 DSH `0.2.1-rc.5` 验收了流式回复、同一消息重试、宿主冷重启后续聊、更新人设和纠正长期记忆。原聊天记录保留，续聊请求读取当前人设和纠正后的事实。独立会话只收到可共享的事实。120 项相关检查、类型检查与构建通过。模型回复由本地测试服务提供，正式宿主待安装。 [隔离验收](../.work/bot-core-chat.9HxvuS/acceptance.json)
+
+## 182. 2026-11-20 暂停开发交接
+
+大肥鱼由 DeepSeek Harness 承载模型、会话和工具调用。Companion 插件保存角色档案、记忆、配对和自主行为。恢复开发时，先沿第 177、181 节复核聊天、重启续接、记忆与跨日目标。Minecraft 和手机端的现有入口可以继续用于验收。
+
+Mac mini 的 Companion `0.128.0` 和 Coopcraft 正式服在线，沿用现有配置与存档。正式服 CBI 使用已有的材料配色版本，JAR SHA-256 以 `15367b0f` 开头。跟随平视、精确落脚点、床交互和聊天续接的近期改动已在本地检查，仍待正式部署。Mac mini 的容器启动脚本含当机路径，保留在该机 `server/start.sh`。
+
+- 本机聊天隔离验收对应的 Companion 包 SHA-256 以 `925858c2` 开头。暂停提交另外把既有传送和切换模式登记进工具权限清单。从暂停提交恢复部署时可以重新构建对应包。 [隔离验收](../.work/bot-core-chat.9HxvuS/acceptance.json) · [验收用包](../.work/bot-core-chat.9HxvuS/dsh-companion-bot-0.128.0.tgz)
+- 本机 CBI 候选包包含跟随平视、落脚点和床交互。SHA-256 以 `5f1201f8` 开头。潮灯港和潮阙港的原图与正式服施工回执保留在第 175、176 节引用的本机目录。 [CBI 验收](../.work/cbi-bed-routine.7V0PId/evidence.json) · [CBI 候选包](../.work/cbi-bed-routine.7V0PId/carpetbaritoneintegration-v1.7.1+260820-co-play.jar)
+- Android 定制源码可从固定上游加补丁恢复，重建的源码树与本机一致。保留了本地 APK 和模拟器数据。 [安卓源码恢复](../backups/README.md)
+
+暂停前通过 `pnpm check` 和 1,903 项 Companion 与 Worker 自动检查。恢复本机开发依赖时运行 `pnpm install --frozen-lockfile`。Flutter 源码检出保留在 `.work/toolchain/flutter`，固定为 `3.47.7`，重新构建安卓时可用该检出的 `bin/flutter precache --android` 补齐工具缓存。Mac mini 清理了旧 Gradle 缓存、构建中间产物和 Python 安装包下载缓存。

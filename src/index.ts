@@ -94,6 +94,7 @@ export const Config = s.object({
   minecraftWorkerPort: s.number().min(1024).max(65_535).step(1).default(18789).description('Loopback HTTP port of the spawned Minecraft worker.'),
   minecraftGamePort: s.number().min(1).max(65_535).step(1).default(25565).description('Loopback port reported for the local Minecraft server.'),
   minecraftOwner: s.string().default('thyysummer').description('The owner player that the companion may follow. The bot is a separate Carpet fake player.'),
+  minecraftVoxelBuilding: s.boolean().default(false).description('Allow inspected voxel construction on a local CBI server with the Companion Blueprints Fabric mod.'),
   minecraftWardrobeFile: s.string().default('').description('Optional absolute path to a private allowlist of YSM model choices for the companion.'),
   minecraftVoiceDir: s.string().default('').description('Optional private local directory shared with the Minecraft voice relay.'),
   minecraftOvoRoot: s.string().default('').description('Optional absolute path to the local DeepseekOVO skill library for the account-backed worker.'),
@@ -186,9 +187,13 @@ export function apply(ctx: Context, config: CompanionConfig): void {
       timeoutMs: config.ttsTimeoutMs,
     },
   }, join(dataDir, 'media'), dataDir, config.avatarDir || join(homedir(), '.local', 'share', 'companion', 'avatar'), config.minecraftServerRoot || join(homedir(), '工作', '会话', 'coopcraft', 'server'), config.minecraftOwner, realtimePcm, asr, singing, cover, separator, score, config.minecraftWardrobeFile, {
-    workerPort: config.minecraftWorkerPort, gamePort: config.minecraftGamePort, consoleFifo: config.minecraftConsoleFifo, offline: config.minecraftOffline, voiceDir: config.minecraftVoiceDir,
+    workerPort: config.minecraftWorkerPort, gamePort: config.minecraftGamePort, consoleFifo: config.minecraftConsoleFifo,
+    offline: config.minecraftOffline, voiceDir: config.minecraftVoiceDir, voxelBuilding: config.minecraftVoxelBuilding,
   }, config.bilibiliFfmpegPath || 'ffmpeg', config.minecraftOvoRoot)
-  const devices = new DeviceService(ctx, store, id => runtime.devicePlayback.revoke(id))
+  const devices = new DeviceService(ctx, store, id => {
+    runtime.devicePlayback.revoke(id)
+    runtime.qwenWatch.revoke(id)
+  })
   runtime.musicPlugins = new MusicPluginService(config.musicPluginsDir || join(homedir(), '.local', 'share', 'companion', 'music-plugins'), async path => {
     if (path === 'singing') return runtime.singing.archive()
     const track = /^singing\/([0-9a-f-]{36})$/u.exec(path)
@@ -206,7 +211,7 @@ export function apply(ctx: Context, config: CompanionConfig): void {
     authorize: req => devices.authorize(req),
     onConnection: (socket, req) => devices.track(req, socket),
     contextAllowed: deviceContextAllowed,
-    projectActivity: deviceActivity,
+    projectActivity: activity => deviceActivity(activity, store),
     homeLive: () => runtime.homeLive(),
   }))
   ctx.effect(() => ctx.tools.guard(({ agent, name }) => {
@@ -239,7 +244,7 @@ export function apply(ctx: Context, config: CompanionConfig): void {
   ctx.effect(() => registerBilibiliClipInput(ctx, runtime))
   ctx.effect(() => registerBilibiliChoiceBudget(ctx, store))
   ctx.effect(() => registerFeedReplyBudget(ctx, store))
-  ctx.effect(() => registerChatCapabilities(ctx, store, runtime.minecraft))
+  ctx.effect(() => registerChatCapabilities(ctx, store, runtime.minecraft, runtime.voxelBlueprints))
   ctx.effect(() => registerMobileChatEffort(ctx, store))
   ctx.effect(() => () => devices.close())
   ctx.effect(() => () => runtime.close())

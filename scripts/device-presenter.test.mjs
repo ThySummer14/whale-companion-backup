@@ -13,7 +13,7 @@ function override(t, name, value) {
   t.after(() => { if (original) Object.defineProperty(globalThis, name, original); else delete globalThis[name] })
 }
 
-function fakePixi(t) {
+function fakePixi(t, { textures = [], textureLimit = 4096, fromCanvas } = {}) {
   const created = [], sources = [], values = new Map()
   let disconnects = 0
   class App {
@@ -23,7 +23,7 @@ function fakePixi(t) {
       this.stage = { addChild: model => { this.model = model } }
       this.ticker = { started: options.autoStart !== false, deltaMS: 34, add: callback => { this.update = callback } }
       this.renderer = {
-        gl: { getExtension: () => undefined, getParameter: () => 'TestRenderer' },
+        gl: { MAX_TEXTURE_SIZE: 0x0D33, getExtension: () => undefined, getParameter: key => key === 0x0D33 ? textureLimit : 'TestRenderer' },
         resize: () => {}, render: () => { this.model.internalModel.updateNaturalMovements(); this.model.mouth?.() },
       }
     }
@@ -37,11 +37,11 @@ function fakePixi(t) {
     const renderer = { _clippingManager: { getClippingMaskBufferSize: () => 2048, setClippingMaskBufferSize() {} } }
     const coreModel = { getParameterValueById: key => values.get(key) ?? 0, setParameterValueById: (key, value) => values.set(key, value) }
     return {
-      update: () => {}, position: { set() {} }, scale: { set() {} }, anchor: { set() {} },
+      textures: [...textures], update: () => {}, position: { set() {} }, scale: { set() {} }, anchor: { set() {} },
       internalModel: { originalWidth: 192, originalHeight: 300, renderer, coreModel, on(_event, callback) { this.owner.mouth = callback } },
     }
   }
-  override(t, 'PIXI', { Application: App, live2d: { Live2DModel: { registerTicker() {}, async from(...args) {
+  override(t, 'PIXI', { Texture: { from: fromCanvas }, Application: App, live2d: { Live2DModel: { registerTicker() {}, async from(...args) {
     const model = makeModel(...args)
     model.internalModel.owner = model
     return model
@@ -50,6 +50,32 @@ function fakePixi(t) {
   override(t, 'devicePixelRatio', 3)
   return { created, sources, values, disconnects: () => disconnects }
 }
+
+test('renderer fits oversized atlases before upload while preserving aspect ratio, texture slots and originals that fit', async t => {
+  const texture = (width, height) => ({
+    baseTexture: { realWidth: width, realHeight: height, resource: { source: { width, height } } },
+    destroy(baseTexture) { this.destroyed = baseTexture },
+  })
+  const tall = texture(4096, 8192)
+  const square = texture(8192, 8192)
+  const fits = texture(4096, 2048)
+  const draws = []
+  override(t, 'document', { createElement: () => ({ getContext: () => ({ drawImage: (...args) => draws.push(args) }) }) })
+  fakePixi(t, { textures: [tall, fits, square, tall], fromCanvas: canvas => ({ canvas }) })
+  t.mock.method(globalThis, 'fetch', async () => Response.json(profile))
+  const scene = await createAvatarRenderer({ parentElement: { clientWidth: 390, clientHeight: 590 } })
+  const [first, second, third, repeated] = scene.model.textures
+  assert.deepEqual(draws, [
+    [tall.baseTexture.resource.source, 0, 0, 2048, 4096],
+    [square.baseTexture.resource.source, 0, 0, 4096, 4096],
+  ])
+  assert.deepEqual([first.canvas.width, first.canvas.height, third.canvas.width, third.canvas.height], [2048, 4096, 4096, 4096])
+  assert.equal(first, repeated)
+  assert.equal(second, fits)
+  assert.ok(tall.destroyed && square.destroyed)
+  assert.equal(fits.destroyed, undefined)
+  scene.destroy()
+})
 
 function fakePage(t) {
   const nodes = { status: {}, 'reduce-motion': { checked: false }, 'reduce-motion-label': {} }

@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { randomBytes, randomInt } from 'node:crypto'
-import { open, stat } from 'node:fs/promises'
+import { open, readFile, stat } from 'node:fs/promises'
 import { closeSync, constants, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import type { Stats } from 'node:fs'
 import { homedir } from 'node:os'
@@ -9,16 +9,19 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import type { MinecraftAuthorizedZone } from '../../src/core/minecraft-supply.ts'
 import { CAMP_GATHER_MAX_MS, MinecraftCampGatherOffer, MinecraftCampGatherReceipt, MinecraftCampGatherRequest, minecraftProjectGatherEligible } from '../../src/core/minecraft-gather.ts'
-import { MINECRAFT_HOUSE_CANDIDATE_LIMIT, MinecraftHouseCellBlockedReason, MinecraftHouseCellCandidates, MinecraftHouseCellReceipt, MinecraftHouseCellRequest, minecraftHouseCellTarget } from '../../src/core/minecraft-house-cell.ts'
+import { MINECRAFT_HOUSE_CANDIDATE_LIMIT, MinecraftHouseCellBlockedReason, MinecraftHouseCellCandidates, MinecraftHouseCellMaterial, MinecraftHouseCellReceipt, MinecraftHouseCellRequest, minecraftHouseCellTarget } from '../../src/core/minecraft-house-cell.ts'
 import { MINECRAFT_HOUSE_BLOCKS, MinecraftHousePreview, MinecraftHouseReceipt, MinecraftHouseRequest, minecraftHouseCells, minecraftHouseReceiptMatches, type MinecraftHouseMaterial } from '../../src/core/minecraft-house.ts'
 import { MinecraftHouseProjectVerification, MinecraftHouseProjectVerifyRequest } from '../../src/core/minecraft-house-project.ts'
 import { MinecraftHouseSupplyReceipt, MinecraftHouseSupplyRequest, type MinecraftHouseSupplyPreview } from '../../src/core/minecraft-house-supply.ts'
+import { MinecraftHouseSupportRequest } from '../../src/core/minecraft-house-support.ts'
 import { HOUSE_VERIFICATION_ISSUE_LIMIT, MinecraftHouseVerification } from '../../src/core/minecraft-house-verification.ts'
+import { VoxelWorldInput, type VoxelWorldMode, type VoxelWorldReceipt } from '../../src/core/minecraft-blueprint-build.ts'
 import { CAMP_WOODS, MinecraftAuthorizedCampRequest, MinecraftSupplyRequest, MinecraftVisitBuildOffer, MinecraftVisitBuildReceipt, MinecraftVisitBuildRequest, MinecraftVisitRevisitReceipt, MinecraftVisitRevisitRequest, MinecraftVisitSupplyOffer, MinecraftVisitSupplyReceipt, authorizedInventory, minecraftCampOffer, minecraftPrepareOffer, minecraftSupplyOffer, minecraftVisitSupplyOffer } from '../../src/core/minecraft-supply.ts'
 import { CAMP_PATROL_MAX_MS, MinecraftPatrolSegmentReceipt, MinecraftPatrolSegmentRequest, MinecraftSurveyPreview, MinecraftSurveyPreviewRequest, MinecraftSurveyReceipt, MinecraftSurveyRequest, MinecraftTrailReceipt, SURVEY_DISTANCE, SURVEY_TRAIL_IDS } from '../../src/core/minecraft-survey.ts'
 import type { MinecraftWardrobeView } from '../../src/protocol/minecraft-wardrobe.ts'
 import { MinecraftShieldReceipt, type MinecraftShieldRequest } from '../../src/protocol/minecraft-shield.ts'
-import { configuredWardrobe, YSM_MODEL_NBT, ysmWardrobeAvailable, ysmWardrobeReceipt, ysmWardrobeStateLine } from './wardrobe.ts'
+import { BPM_MODEL_NBT, configuredWardrobe, YSM_MODEL_NBT, ysmWardrobeAvailable, ysmWardrobeReceipt, ysmWardrobeStateLine } from './wardrobe.ts'
+import { runVoxelBlueprint } from './blueprint-world.ts'
 
 const LOGS = ['oak_log', 'spruce_log', 'birch_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log'] as const
 const LEAVES = ['oak_leaves', 'spruce_leaves', 'birch_leaves', 'jungle_leaves', 'acacia_leaves', 'dark_oak_leaves', 'mangrove_leaves', 'cherry_leaves', 'azalea_leaves', 'flowering_azalea_leaves'] as const
@@ -31,13 +34,16 @@ const CAMP_GATHER_TIMEOUT_MS = 70_000
 const HOUSE_BUILD_TIMEOUT_MS = 420_000
 const HOUSE_CELL_TIMEOUT_MS = 45_000
 const HOUSE_CANDIDATES_TIMEOUT_MS = 30_000
-const HOUSE_VERIFICATION_TIMEOUT_MS = 45_000
+const HOUSE_VERIFICATION_TIMEOUT_MS = 120_000
+const HOUSE_VERIFICATION_RECEIPT_TIMEOUT_MS = 30_000
 const CAMP_VISIT_MAX_MS = 5 * 60_000
 const CAMP_VISIT_RETRY_MS = 5000
 const CHAT_RELAY_POLL_FRESH_MS = 3000
 const CHAT_RELAY_RENEW_MS = 6000
 const CAMP_VISIT_LOG_LIMIT = 1024 * 1024
 const CAMP_VISIT_BLOCK_CHECK = /^\[[^\]\r\n]+\] \[Server thread\/INFO\]: Test (passed|failed)\r?\n/mu
+const AUTO_BED_CHECK_MS = 10_000
+const BED_USE_TERMINAL = 'nightbed (?:refused|idle|(?:spawn-set|sleeping|reminded) -?\\d+ -?\\d+ -?\\d+(?: reminded)?)'
 const SURVEY_RETREAT_REASON = 'survey-terrain-changed'
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
@@ -45,7 +51,7 @@ type Position = { x: number; y: number; z: number }
 type HouseMaterials = Partial<Record<MinecraftHouseMaterial, number>>
 type HouseSession = { epoch: number; dev: number; ino: number; offset: number }
 type HouseProgress = { phase: string; checked: number; placed: number; reason: string }
-const HOUSE_MATERIALS = Object.values(MINECRAFT_HOUSE_BLOCKS).filter(block => block !== 'air')
+const HOUSE_MATERIALS = Object.values(MINECRAFT_HOUSE_BLOCKS).filter(block => block !== 'air').map(block => block.split('[', 1)[0] as MinecraftHouseMaterial)
 type EntityData = Record<string, unknown> | unknown[] | string | number
 type Action = { kind: string; controller: AbortController; digTarget?: Position; unreachable?: true }
 type WardrobeModelState = { modelId: string; texture: string; mandatory: boolean; disabled: boolean }
@@ -200,6 +206,14 @@ function position(value: unknown): Position | undefined {
   return numbers.every(number => number !== undefined) ? { x: numbers[0]!, y: numbers[1]!, z: numbers[2]! } : undefined
 }
 
+function checkedBed(result: string) {
+  const [, outcome, x, y, z, notice] = result.split(' ')
+  if (outcome !== 'sleeping' && outcome !== 'spawn-set' && outcome !== 'reminded') return undefined
+  return { target: { x: Number(x), y: Number(y), z: Number(z) }, sleeping: outcome !== 'spawn-set',
+    ...(outcome === 'spawn-set' && { spawnSet: true }),
+    ...((outcome === 'reminded' || notice === 'reminded') && { ownerReminded: true }) }
+}
+
 export class CbiWorld extends EventEmitter {
   readonly botName: string
   private readonly serverRoot: string
@@ -209,7 +223,9 @@ export class CbiWorld extends EventEmitter {
   private online = false
   private creative = false
   private connecting = false
-  private features?: { survival: boolean; safeReturn: boolean; crafting: boolean; shield: boolean; nightShelter: boolean; campBuilding: boolean; houseBuilding: boolean; houseRecovery: boolean; houseCellPlacement: boolean; campSurvey: boolean; campSurveyRoutes: boolean; campSurveyTrails: boolean; campGather: boolean; chatRelay: boolean }
+  private features?: { survival: boolean; safeReturn: boolean; crafting: boolean; shield: boolean; nightShelter: boolean; bedInteraction: boolean; campBuilding: boolean; houseBuilding: boolean; houseRecovery: boolean; houseCellPlacement: boolean; campSurvey: boolean; campSurveyRoutes: boolean; campSurveyTrails: boolean; campGather: boolean; chatRelay: boolean }
+  private bedCheck?: Promise<void>
+  private nextBedCheckAt = 0
   private chatRelayDemandUntil = 0
   private chatRelayRenewAt = 0
   private chatRelayMayBeActive = false
@@ -236,6 +252,7 @@ export class CbiWorld extends EventEmitter {
   private pendingDeath?: string
   private reflexEnabled = !this.campPaused
   private action?: Action
+  private voxelOperation?: Promise<VoxelWorldReceipt>
   private avoidTargets = new Set<string>()
   private lastError?: string
   private observation?: Record<string, unknown>
@@ -276,7 +293,7 @@ export class CbiWorld extends EventEmitter {
     } catch (error) {
       if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') this.visitJournalInvalid = true
     }
-    this.timer = setInterval(() => { void this.pump(); this.reapCampVisit() }, 500)
+    this.timer = setInterval(() => { void this.pump(); this.reapCampVisit(); this.checkNearbyBed() }, 500)
     this.timer.unref()
   }
 
@@ -355,6 +372,7 @@ export class CbiWorld extends EventEmitter {
         crafting: this.features?.crafting ?? false,
         shield: this.features?.shield ?? false,
         nightShelter: this.features?.nightShelter ?? false,
+        bedInteraction: this.features?.bedInteraction ?? false,
         campBuilding: this.features?.campBuilding ?? false,
         houseBuilding: this.features?.houseBuilding ?? false,
         houseProjects: this.online && this.features?.houseBuilding === true,
@@ -375,16 +393,10 @@ export class CbiWorld extends EventEmitter {
   }
 
   private async readLog(offset: number, maxBytes = 131_072): Promise<{ offset: number; text: string }> {
-    const info = await stat(this.logPath)
-    const start = Math.max(info.size < offset ? 0 : offset, info.size - maxBytes)
-    const length = info.size - start
-    if (!length) return { offset: info.size, text: '' }
-    const file = await open(this.logPath, 'r')
-    try {
-      const buffer = Buffer.alloc(length)
-      await file.read(buffer, 0, length, start)
-      return { offset: info.size, text: buffer.toString('utf8') }
-    } finally { await file.close() }
+    const data = await readFile(this.logPath)
+    let start = Math.max(data.length < offset ? 0 : offset, data.length - maxBytes)
+    while (start < data.length && (data[start]! & 0xc0) === 0x80) start++
+    return { offset: data.length, text: data.subarray(start).toString('utf8') }
   }
 
   private async pump(): Promise<void> {
@@ -486,7 +498,7 @@ export class CbiWorld extends EventEmitter {
     }
   }
 
-  private async send(command: string, accept: RegExp | ((text: string) => boolean), timeout = 6000, settleMs = 0, signal?: AbortSignal, onDispatch?: () => void, longRead = false): Promise<string> {
+  private async send(command: string, accept: RegExp | ((text: string) => boolean), timeout = 15000, settleMs = 0, signal?: AbortSignal, onDispatch?: () => void, longRead = false): Promise<string> {
     if (this.closing) throw new Error('minecraft-worker-closing')
     if (/\r|\n|[\u0000-\u001f\u007f]/u.test(command)) throw new Error('invalid-console-command')
     const result = this.commandQueue.then(async () => {
@@ -514,7 +526,16 @@ export class CbiWorld extends EventEmitter {
         if (Date.now() >= deadline) break
         await delay(80)
       }
-      throw new Error(`console-receipt-timeout:${command.split(' ')[0]}`)
+      const diagnostic: Record<string, unknown> = { command: command.slice(0, 160), offset }
+      try {
+        const current = await this.readLog(offset)
+        diagnostic.readOffset = current.offset
+        diagnostic.tail = current.text.replaceAll('\n', ' | ').slice(-360)
+      } catch (error) {
+        diagnostic.readError = error instanceof Error ? error.message : String(error)
+      }
+      this.record('console.timeout', diagnostic)
+      throw new Error(`console-receipt-timeout:${command}`)
     })
     this.commandQueue = result.catch(() => {})
     return result
@@ -592,19 +613,21 @@ export class CbiWorld extends EventEmitter {
   }
 
   private async wardrobeState(signal?: AbortSignal): Promise<WardrobeModelState | 'absent' | 'offline'> {
-    // YSM 2.6.5 adds this appearance attachment to vanilla Entity.writeNbt.
-    // Data commands can read it even when server logs use untranslated YSM keys.
-    const read = (log: string) => ysmWardrobeStateLine(log, this.botName)
-    const line = read(await this.send(`data get entity ${this.botName} ${YSM_MODEL_NBT}`, log => read(log) !== undefined,
-      2000, 0, signal, signal && (() => {})))
-    if (!line || line.kind === 'absent') return 'absent'
-    if (line.kind === 'offline') return 'offline'
-    if (line.kind !== 'data') return 'absent'
-    const nbt = parseSnbt(line.snbt) as Record<string, unknown> | undefined
-    if (typeof nbt?.model_id !== 'string' || typeof nbt.select_texture !== 'string' ||
-      ![true, false, 1, 0].includes(nbt.mandatory as boolean | number) ||
-      ![true, false, 1, 0].includes(nbt.disabled as boolean | number)) return 'absent'
-    return { modelId: nbt.model_id, texture: nbt.select_texture, mandatory: Boolean(nbt.mandatory), disabled: Boolean(nbt.disabled) }
+    // Both providers expose the selected appearance through vanilla entity data.
+    for (const path of [YSM_MODEL_NBT, BPM_MODEL_NBT]) {
+      const read = (log: string) => ysmWardrobeStateLine(log, this.botName, path)
+      const line = read(await this.send(`data get entity ${this.botName} ${path}`, log => read(log) !== undefined,
+        2000, 0, signal, signal && (() => {})))
+      if (line?.kind === 'absent') continue
+      if (line?.kind === 'offline') return 'offline'
+      if (line?.kind !== 'data') return 'absent'
+      const nbt = parseSnbt(line.snbt) as Record<string, unknown> | undefined
+      if (typeof nbt?.model_id !== 'string' || typeof nbt.select_texture !== 'string' ||
+        ![true, false, 1, 0].includes(nbt.mandatory as boolean | number) ||
+        ![true, false, 1, 0].includes(nbt.disabled as boolean | number)) return 'absent'
+      return { modelId: nbt.model_id, texture: nbt.select_texture, mandatory: Boolean(nbt.mandatory), disabled: Boolean(nbt.disabled) }
+    }
+    return 'absent'
   }
 
   async changeAppearance(id: string, signal: AbortSignal): Promise<MinecraftWardrobeView> {
@@ -667,16 +690,27 @@ export class CbiWorld extends EventEmitter {
   }
 
   private async data(player: string, path: string, signal?: AbortSignal): Promise<EntityData | undefined> {
-    const output = await this.send(`data get entity ${player} ${path}`, new RegExp(`${player} has the following entity data:|No entity was found`, 'iu'), 6000, 0, signal, signal && (() => {}))
-    if (/No entity was found/iu.test(output)) return undefined
-    const marker = /has the following entity data:\s*/iu.exec(output)
-    if (!marker || marker.index === undefined) throw new Error('entity-data-unconfirmed')
+    const output = await this.send(`data get entity ${player} ${path}`, log => {
+      const anchor = log.lastIndexOf(`data get entity ${player} ${path}`)
+      return new RegExp(`${player} has the following entity data:|No entity was found`, 'iu').test(anchor >= 0 ? log.slice(anchor) : log)
+    }, 15000, 0, signal, signal && (() => {}))
+    const marker = [...output.matchAll(/has the following entity data:\s*/giu)].at(-1)
+    if (!marker || marker.index === undefined) {
+      if (/No entity was found/iu.test(output)) return undefined
+      throw new Error('entity-data-unconfirmed')
+    }
     const raw = output.slice(marker.index + marker[0].length).trim().split('\n')[0] ?? ''
     if (path === 'Pos') {
-      const values = [...raw.matchAll(/(-?\d+(?:\.\d+)?)[dD]?/gu)].map(match => Number(match[1]))
-      if (values.length >= 3) return values.slice(0, 3)
+      const values = [...output.matchAll(/has the following entity data: \[(-?\d+(?:\.\d+)?)d, (-?\d+(?:\.\d+)?)d, (-?\d+(?:\.\d+)?)d\]/gu)]
+        .map(match => match.slice(1, 4).map(Number)).at(-1)
+      if (values) return values
     }
-    if (path === 'Dimension' || path === 'Inventory') return parseSnbt(raw) as EntityData
+    if (path === 'Dimension') return [...output.matchAll(/has the following entity data: "([^"]+)"/gu)].at(-1)?.[1]
+    if (path === 'Inventory') return parseSnbt(raw) as EntityData
+    if (path === 'playerGameType') {
+      const value = [...output.matchAll(/has the following entity data: ([0-3])(?:\r?\n|$)/gu)].at(-1)?.[1]
+      return value === undefined ? undefined : Number(value)
+    }
     return numeric(raw) ?? raw.replace(/^"|"$/gu, '')
   }
 
@@ -693,14 +727,14 @@ export class CbiWorld extends EventEmitter {
 
   private async cbi(command: string, sender = this.botName, settleMs = 0, completion: RegExp = /\[CBI\] /u, signal?: AbortSignal, onDispatch?: () => void, camp?: CampVisit['zone']): Promise<string> {
     const guard = camp ? ` at @s if dimension ${camp.dimension} positioned ${camp.x + 0.5} ${camp.y} ${camp.z + 0.5} if entity @s[distance=..0.35]` : ''
-    const output = await this.send(`execute as ${sender}${guard} run tell ${this.botName} cbi ${command}`, completion, 8000, settleMs, signal, onDispatch)
+    const output = await this.send(`execute as ${sender}${guard} run tell ${this.botName} cbi ${command}`, completion, 15000, settleMs, signal, onDispatch)
     if (/\[CBI\] .*?(?:错误|未知指令|寻路执行失败|找不到)/u.test(output)) throw new Error(output.slice(output.lastIndexOf('[CBI]'), output.lastIndexOf('[CBI]') + 240))
     return output
   }
 
   private async survivalStatus(): Promise<string | undefined> {
     const receipt = new RegExp(`CBI feedback sender=${this.botName} target=${this.botName} message="?\\[CBI\\] (threat=[^"\\r\\n]+|错误: 未知指令。发送 cbi help 查看帮助)`, 'u')
-    const output = await this.send(`execute as ${this.botName} run tell ${this.botName} cbi survival`, receipt, 8000)
+    const output = await this.send(`execute as ${this.botName} run tell ${this.botName} cbi survival`, receipt, 15000)
     const status = receipt.exec(output)?.[1]
     return status?.startsWith('threat=') ? status : undefined
   }
@@ -725,7 +759,7 @@ export class CbiWorld extends EventEmitter {
       ['allowBreakAnyway', LOGS.join(',')],
       ['fakePlayerCompletionMessageMinTicks', '0'],
     ]) {
-      const output = await this.cbi(`set ${name} ${value}`)
+      const output = await this.cbi(`set ${name} ${value}`, this.botName, 0, new RegExp(`\\[CBI\\] ${name} =`))
       if (!output.includes(`[CBI] ${name} =`)) throw new Error(`cbi-setting-unconfirmed:${name}`)
     }
     const campSurvey = survival && commands.includes('survey')
@@ -737,6 +771,7 @@ export class CbiWorld extends EventEmitter {
       crafting: survival && commands.includes('craft'),
       shield: survival && commands.includes('shield'),
       nightShelter: commands.includes('nightbed') && commands.includes('nightshelter'),
+      bedInteraction: commands.includes('nightbed') && help.includes(`CBI feedback sender=${this.botName} target=${this.botName} message="[CBI] Companion 床交互: v1`),
       campBuilding: survival && commands.includes('buildcamp'),
       houseBuilding,
       houseRecovery: houseBuilding && commands.includes('homebuildrecover'),
@@ -840,6 +875,7 @@ export class CbiWorld extends EventEmitter {
 
   withCampAction<T>(run: () => T, visitId?: string): T {
     if (this.campPaused) throw new Error('minecraft-camp-paused')
+    if (this.voxelOperation) throw new Error('action-busy')
     if (this.action?.kind === 'house-build' || this.action?.kind === 'house-cell' || this.action?.kind === 'house-supply') throw new Error('action-busy')
     if (visitId !== undefined) {
       if (this.visit?.id !== visitId || this.visitEnding || Date.now() >= this.visit.expiresAt) throw new Error('minecraft-camp-visit-refused')
@@ -1174,6 +1210,7 @@ export class CbiWorld extends EventEmitter {
   }
 
   private async startAction(kind: string, enableReflex = true): Promise<Action> {
+    if (this.bedCheck) await this.bedCheck
     this.assertCampAdmission()
     if (!this.online) throw new Error('minecraft-offline')
     if (!this.features) throw new Error('minecraft-not-ready')
@@ -1192,8 +1229,13 @@ export class CbiWorld extends EventEmitter {
   }
 
   async stop(): Promise<unknown> {
+    this.nextBedCheckAt = Date.now() + AUTO_BED_CHECK_MS
     this.action?.controller.abort()
     const previous = this.action?.kind
+    if (this.bedCheck) await this.bedCheck
+    if (this.voxelOperation) await this.voxelOperation.catch(error => {
+      if (error instanceof Error && error.message === 'blueprint-stop-unconfirmed') throw error
+    })
     if (!this.online) return { stopped: true, online: false }
     await this.configure()
     await this.setReflex(false)
@@ -1267,19 +1309,24 @@ export class CbiWorld extends EventEmitter {
   private async waitForArrival(target: Position, action: Action, origin: Position): Promise<Record<string, unknown>> {
     const deadline = Date.now() + 45_000
     const notBefore = Date.now() + 1500
+    const atTarget = (point?: Position) => point && Math.floor(point.x) === target.x &&
+      Math.floor(point.y) === target.y && Math.floor(point.z) === target.z
     while (Date.now() < deadline) {
       action.controller.signal.throwIfAborted()
       const observation = await this.observe()
+      action.controller.signal.throwIfAborted()
       const current = observation.position as Position | undefined
       if (typeof observation.oxygen === 'number' && observation.oxygen < 280) throw new Error('move-air-falling')
       if (current && Math.hypot(current.x - origin.x, current.z - origin.z) >
         Math.hypot(target.x - origin.x, target.z - origin.z) + 8) throw new Error('move-route-diverged')
-      if (current && Math.floor(current.x) === target.x && Math.floor(current.y) === target.y && Math.floor(current.z) === target.z) return observation
+      if (atTarget(current)) return observation
       const status = typeof observation.cbiStatus === 'string' ? observation.cbiStatus : ''
       if (Date.now() >= notBefore && (status.includes('没有执行中的') || /无法|失败/iu.test(status))) {
-        const settled = await this.stop() as { observation?: Record<string, unknown> }
-        const actual = settled.observation?.position as Position | undefined
-        if (actual && Math.floor(actual.x) === target.x && Math.floor(actual.y) === target.y && Math.floor(actual.z) === target.z) return settled.observation!
+        await delay(600)
+        action.controller.signal.throwIfAborted()
+        const settled = await this.observe()
+        action.controller.signal.throwIfAborted()
+        if (atTarget(settled.position as Position | undefined)) return settled
         throw new Error('move-ended-without-arrival')
       }
       await delay(600)
@@ -1296,18 +1343,29 @@ export class CbiWorld extends EventEmitter {
     const below = { x: target.x, y: target.y - 1, z: target.z }
     for (const hazard of HAZARDS) if (await this.block(target, hazard) || await this.block(below, hazard)) throw new Error('unsafe-target')
     const action = await this.startAction('move')
+    let rejected = false
     try {
-      const receipt = await this.cbi(`goto ${target.x} ${target.y} ${target.z}`)
+      const receipt = await this.cbi(`goto ${target.x} ${target.y} ${target.z}`, this.botName, 0, undefined, action.controller.signal)
+      const reason = /\[CBI\] 落脚点不可用 \[(move-target-blocked|move-target-unsupported)\]/u.exec(receipt)?.[1]
+      if (reason) {
+        rejected = true
+        throw new Error(reason)
+      }
       if (!receipt.includes('正在计算到')) throw new Error('move-unconfirmed')
       const observation = await this.waitForArrival(target, action, current)
+      action.controller.signal.throwIfAborted()
       this.action = undefined
       this.record('action.finished', { kind: 'move', target })
       return { moved: true, target, observation }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      this.action = undefined
+      if (this.action === action) {
+        if (this.online && !rejected && !action.controller.signal.aborted) {
+          await this.cbi('stop', this.botName, 0, undefined, action.controller.signal).catch(() => {})
+        }
+        if (this.action === action) this.action = undefined
+      }
+      const message = action.controller.signal.aborted ? 'move-cancelled' : error instanceof Error ? error.message : String(error)
       this.record('action.failed', { kind: 'move', target, error: message })
-      if (this.online) await this.cbi('stop').catch(() => {})
       if (action.controller.signal.aborted) throw new Error('move-cancelled')
       throw error
     }
@@ -1321,7 +1379,7 @@ export class CbiWorld extends EventEmitter {
     const action = await this.startAction('teleport')
     try {
       await this.writeConsole(`tp ${this.botName} ${target.x} ${target.y} ${target.z}`)
-      const deadline = Date.now() + 8000
+      const deadline = Date.now() + 15000
       let current: Position | undefined
       while (Date.now() < deadline) {
         current = await this.positionOf(this.botName)
@@ -1343,7 +1401,7 @@ export class CbiWorld extends EventEmitter {
     if (!this.online) throw new Error('minecraft-offline')
     await this.writeConsole(`gamemode ${mode} ${this.botName}`)
     const expected = mode === 'creative' ? 1 : 0
-    const deadline = Date.now() + 8000
+    const deadline = Date.now() + 15000
     let actual: number | undefined
     while (Date.now() < deadline) {
       actual = numeric(await this.data(this.botName, 'playerGameType'))
@@ -1354,6 +1412,26 @@ export class CbiWorld extends EventEmitter {
     this.creative = mode === 'creative'
     this.record('gamemode.changed', { mode })
     return { mode }
+  }
+
+  async voxelBlueprint(mode: VoxelWorldMode, raw: unknown, signal: AbortSignal): Promise<VoxelWorldReceipt> {
+    const input = VoxelWorldInput.safeParse(raw).data
+    if (!input) throw new Error('blueprint-invalid-request')
+    const action = await this.startAction('build', false)
+    const bounded = AbortSignal.any([signal, action.controller.signal, AbortSignal.timeout(155_000)])
+    const operation = (async () => {
+      if (mode === 'build') await this.setReflex(false)
+      bounded.throwIfAborted()
+      return runVoxelBlueprint(input, mode, this.botName, (command, receipt, abort) => abort
+        ? this.send(command, receipt, 4500, 0, abort, () => bounded.throwIfAborted())
+        : campAdmission.exit(() => this.send(command, receipt, 6000)), bounded)
+    })()
+    this.voxelOperation = operation
+    try { return await operation }
+    finally {
+      if (this.action === action) this.action = undefined
+      this.voxelOperation = undefined
+    }
   }
 
   async inspectTerrain(targets: Position[], signal: AbortSignal): Promise<unknown> {
@@ -1448,14 +1526,41 @@ export class CbiWorld extends EventEmitter {
     return { origin, found }
   }
 
-  private async nightCommand(command: string, terminal: string, signal: AbortSignal): Promise<string> {
+  private async nightCommand(command: string, terminal: string, signal: AbortSignal, guard: () => void = () => {}): Promise<string> {
     const prefix = `^\\[[^\\r\\n\\]]+\\] \\[Server thread/INFO\\]: CBI feedback sender=${this.botName} target=${this.botName} message="\\[CBI\\] `
     const line = new RegExp(prefix + `(${terminal}|错误: night-[a-z-]+)"\\r?$`, 'mu')
-    const receipt = await this.send(`execute as ${this.botName} run tell ${this.botName} cbi ${command}`, line, 15_000, 0, signal, () => {})
+    const receipt = await this.send(`execute as ${this.botName} run tell ${this.botName} cbi ${command}`, line, 15_000, 0, signal, guard)
     const message = line.exec(receipt)?.[1]
     if (!message) throw new Error('night-receipt-unconfirmed')
     if (message.startsWith('错误: ')) throw new Error(message.slice('错误: '.length))
     return message
+  }
+
+  private checkNearbyBed(): void {
+    const action = this.action
+    const epoch = this.connectionEpoch
+    const campEpoch = this.campEpoch
+    const allowed = () => this.online && !this.closing && !this.campPaused && !this.connecting && !this.visit && !this.visitStart &&
+      !this.visitEnding && this.features?.bedInteraction && this.connectionEpoch === epoch && this.campEpoch === campEpoch &&
+      this.action === action && (!action || action.kind === 'follow' && !action.controller.signal.aborted)
+    const now = Date.now()
+    if (this.bedCheck || now < this.nextBedCheckAt || !allowed()) return
+    this.nextBedCheckAt = now + AUTO_BED_CHECK_MS
+    const signal = AbortSignal.timeout(5000)
+    this.bedCheck = this.nightCommand(`nightbed auto ${this.owner}`, BED_USE_TERMINAL, signal, () => {
+      if (!allowed()) throw new Error('night-bed-auto-unavailable')
+    }).then(result => {
+      const receipt = checkedBed(result)
+      if (!allowed() || !receipt) return
+      const reminded = result.startsWith('nightbed reminded ')
+      if (receipt.sleeping && action && !reminded) {
+        action.controller.abort()
+        this.action = undefined
+        if (this.observation?.action === 'follow') this.observation.action = undefined
+        this.record('follow.ended', { reason: 'bed' })
+      }
+      this.record(reminded ? 'night.bed-reminded' : 'night.bed', { ...receipt, autonomous: true })
+    }).catch(() => {}).finally(() => { this.bedCheck = undefined })
   }
 
   async useNightBed(target: Position, place: boolean, signal: AbortSignal): Promise<unknown> {
@@ -1463,6 +1568,12 @@ export class CbiWorld extends EventEmitter {
     const action = await this.startAction('night-bed', false)
     const abort = AbortSignal.any([signal, action.controller.signal])
     try {
+      if (!place && this.features.bedInteraction) {
+        const result = await this.nightCommand(`nightbed use ${target.x} ${target.y} ${target.z}`, BED_USE_TERMINAL, abort)
+        const receipt = checkedBed(result) ?? { sleeping: false, target, reason: 'bed-use-refused' }
+        this.record('night.bed', receipt)
+        return receipt
+      }
       const command = `nightbed ${place ? 'place ' : ''}${target.x} ${target.y} ${target.z}`
       const result = await this.nightCommand(command, 'nightbed (?:sleeping|refused|placed -?\\d+ -?\\d+ -?\\d+)', abort)
       if (place) {
@@ -1532,6 +1643,69 @@ export class CbiWorld extends EventEmitter {
       if (await this.block(candidate, `minecraft:${name}`, undefined, signal)) found.push(candidate)
     }
     return { origin, block: name, found }
+  }
+
+  async buildHouseCreative(input: unknown, signal: AbortSignal): Promise<unknown> {
+    const request = MinecraftHouseRequest.parse(input)
+    if (!this.creative) throw new Error('house-creative-required')
+    const action = await this.startAction('house-creative-build', false)
+    const guard = AbortSignal.any([action.controller.signal, signal])
+    try {
+      const cells = minecraftHouseCells(request.layout).map((cell, index) => ({ ...cell, index }))
+        .filter(cell => cell.block !== 'air' || request.replace === true)
+        .sort((a, b) => Number(a.block.startsWith('lantern')) - Number(b.block.startsWith('lantern')) || a.y - b.y || a.index - b.index)
+      let placed = 0
+      for (const cell of cells) {
+        guard.throwIfAborted()
+        const position = {
+          x: request.zone.x - Math.floor(request.layout.width / 2) + cell.x,
+          y: request.zone.y + cell.y,
+          z: request.zone.z - Math.floor(request.layout.depth / 2) + cell.z,
+        }
+        const expected = cell.block === 'cherry_leaves' ? 'minecraft:cherry_leaves[persistent=true]' : `minecraft:${cell.block}`
+        if (await this.block(position, expected, request.zone.dimension, guard)) continue
+        const replaceable = request.replace === true || await this.block(position, '#minecraft:air', request.zone.dimension, guard) ||
+          await this.block(position, 'minecraft:water', request.zone.dimension, guard)
+        if (!replaceable) {
+          if (await this.block(position, 'minecraft:short_grass', request.zone.dimension, guard)) {
+            await this.writeConsole(`setblock ${position.x} ${position.y} ${position.z} minecraft:air`, () => guard.throwIfAborted())
+            if (!await this.block(position, '#minecraft:air', request.zone.dimension, guard)) throw new Error('homebuild-obstructed')
+          } else throw new Error('homebuild-obstructed')
+        }
+        await this.writeConsole(`setblock ${position.x} ${position.y} ${position.z} ${expected}`, () => guard.throwIfAborted())
+        if (!await this.block(position, expected, request.zone.dimension, guard)) throw new Error('homebuild-placement-unconfirmed')
+        placed++
+      }
+      const missing = await this.readHouseLayout(request, true, guard, () => guard.throwIfAborted())
+      if (Object.values(missing).some(count => count > 0)) throw new Error('house-world-unconfirmed')
+      return MinecraftHouseReceipt.parse({ built: true, zoneId: request.zone.id, checked: request.layout.blocks.length, placed, consumed: {}, creative: true })
+    } finally {
+      if (this.action === action) this.action = undefined
+    }
+  }
+
+  async supportHouse(input: unknown, signal: AbortSignal): Promise<unknown> {
+    const { zone, positions, material } = MinecraftHouseSupportRequest.parse(input)
+    if (!this.creative) throw new Error('house-support-creative-required')
+    const action = await this.startAction('house-support', false)
+    const guard = AbortSignal.any([action.controller.signal, signal])
+    try {
+      let placed = 0
+      for (const position of positions) {
+        guard.throwIfAborted()
+        if (await this.block(position, `minecraft:${material}`, zone.dimension, guard)) continue
+        const replaceable = await this.block(position, '#minecraft:air', zone.dimension, guard) ||
+          await this.block(position, 'minecraft:water', zone.dimension, guard)
+        if (!replaceable) continue
+        await this.writeConsole(`setblock ${position.x} ${position.y} ${position.z} minecraft:${material}`, () => guard.throwIfAborted())
+        if (!await this.block(position, `minecraft:${material}`, zone.dimension, guard)) throw new Error('homebuild-placement-unconfirmed')
+        placed++
+      }
+      this.record('action.finished', { kind: 'house-support', placed, checked: positions.length })
+      return { placed, checked: positions.length }
+    } finally {
+      if (this.action === action) this.action = undefined
+    }
   }
 
   async clearGrass(zone: z.infer<typeof MinecraftAuthorizedZone>, target: Position, signal: AbortSignal): Promise<unknown> {
@@ -2597,11 +2771,13 @@ export class CbiWorld extends EventEmitter {
     const candidates: MinecraftHouseCellCandidates['candidates'] = []
     let checked = 0
     let blocked = 0
-    for (const [index, { x, y, z, block }] of minecraftHouseCells(request.layout).entries()) {
+    for (const [index, { x, y, z, block, material }] of minecraftHouseCells(request.layout).entries()) {
       if (block === 'air') continue
       readSignal.throwIfAborted()
       guard()
-      const cell = { index, x, y, z, material: block }
+      const parsed = MinecraftHouseCellMaterial.safeParse(material)
+      if (!parsed.success) throw new Error('house-cell-unavailable')
+      const cell = { index, x, y, z, material: parsed.data }
       const state = await this.readHouseCell(request, cell, readSignal, guard)
       checked++
       if (state === 'blocked') blocked++
@@ -2722,9 +2898,17 @@ export class CbiWorld extends EventEmitter {
 
     try {
       guard()
-      const idLine = await this.send(`${command} ${loaded} run data get entity @s UUID`, identity, 4000, 0, readSignal, guard)
+      const readIdentity = () => this.send(`${command} ${loaded} run data get entity @s UUID`, identity, 4000, 0, readSignal, guard)
+      const idLine = await readIdentity().catch(async error => {
+        // Right after teleport, the surrounding chunks can finish loading after the first probe.
+        if (!(error instanceof Error) || !error.message.startsWith('console-receipt-timeout:execute')) throw error
+        readSignal.throwIfAborted()
+        await this.verifyHouseSession(session)
+        guard()
+        return readIdentity()
+      })
       const id = identity.exec(idLine)?.slice(1).map(Number)
-      if (!id || id.some(value => value < -0x80000000 || value > 0x7fffffff)) throw new Error('house-project-verification-unconfirmed')
+      if (!id || id.some(value => value < -0x150000000 || value > 0x7fffffff)) throw new Error('house-project-verification-unconfirmed')
       const index = id.reduce((best, value, i) => Math.abs(value) > Math.abs(id[best]!) ? i : best, 0)
       if (!id[index]) throw new Error('house-project-verification-unconfirmed')
 
@@ -2735,31 +2919,32 @@ export class CbiWorld extends EventEmitter {
         const proof = new RegExp(String.raw`^\[[^\]\r\n]+\] \[Server thread/INFO\]: UUID\[${index}\] on ${this.botName} after scale factor of -?\d+\.\d{2} is ${nonce}\r?\n`, 'mu')
         try {
           const query = [command, loaded, ...blocks, `run data get entity @s UUID[${index}] ${scale}`].join(' ')
-          const output = await this.send(query, proof, 4000, 0, readSignal, guard, true)
+          const output = await this.send(query, proof, HOUSE_VERIFICATION_RECEIPT_TIMEOUT_MS, 0, readSignal, guard, true)
           if (!proof.test(output)) throw new Error('house-project-verification-unconfirmed')
           return true
         } catch (error) {
           // Vanilla emits no output when a chained block condition fails.
-          if (error instanceof Error && error.message === 'console-receipt-timeout:execute') return false
+          if (error instanceof Error && error.message.startsWith('console-receipt-timeout:execute')) return false
           throw error
         }
       }
-      const matched = await snapshot(conditions.flat())
       const unmatchedSections: number[] = []
-      if (!matched) {
-        for (const [index, section] of conditions.entries()) {
-          if (!await snapshot(section)) unmatchedSections.push(index)
+      for (const [index, section] of conditions.entries()) {
+        let matched = true
+        for (let start = 0; start < section.length; start += 192) {
+          if (!await snapshot(section.slice(start, start + 192))) { matched = false; break }
         }
-        // Separate successful reads do not prove that the entire structure matched at once.
-        if (!unmatchedSections.length || !await snapshot([])) throw new Error('house-project-verification-unconfirmed')
+        if (!matched) unmatchedSections.push(index)
       }
+      if (unmatchedSections.length && !await snapshot([])) throw new Error('house-project-verification-unconfirmed')
       await this.verifyHouseSession(session)
       readSignal.throwIfAborted()
       guard()
+      const matched = unmatchedSections.length === 0
       return MinecraftHouseProjectVerification.parse({ matched, checked, unmatchedSections })
     } catch (error) {
       if (timeout.aborted && !signal.aborted) throw new Error('house-timeout')
-      if (error instanceof Error && ['console-receipt-timeout:execute', 'console-command-rejected'].includes(error.message)) {
+      if (error instanceof Error && (error.message.startsWith('console-receipt-timeout:execute') || error.message === 'console-command-rejected')) {
         throw new Error('house-project-verification-unconfirmed')
       }
       throw error
@@ -2804,7 +2989,7 @@ export class CbiWorld extends EventEmitter {
         const air = cell.block !== 'air' && await this.block(target, 'minecraft:air', zone.dimension, signal, guard) ||
           await this.block(target, 'minecraft:cave_air', zone.dimension, signal, guard)
         if (air) {
-          if (cell.block !== 'air') missing[cell.block] = (missing[cell.block] ?? 0) + 1
+          if (cell.block !== 'air') missing[cell.material] = (missing[cell.material] ?? 0) + 1
           continue
         }
       }
@@ -2906,7 +3091,7 @@ export class CbiWorld extends EventEmitter {
         await verifyOwnership()
         return { outcome: 'already-present', index: cell.index, material: cell.material, consumed: 0 }
       }
-      if (HOUSE_MATERIALS.some(material => (before[material] ?? 0) < (missing[material] ?? 0))) {
+      if (!this.creative && HOUSE_MATERIALS.some(material => (before[material] ?? 0) < (missing[material] ?? 0))) {
         if (cell) {
           await verifyOwnership()
           return { outcome: 'blocked', index: cell.index, material: cell.material, consumed: 0, reason: 'homebuild-materials' }
@@ -2949,7 +3134,8 @@ export class CbiWorld extends EventEmitter {
       if (!this.houseInventoryMatches(before, after, missing)) throw new Error('house-inventory-unconfirmed')
       await this.verifyHouseReturn(request.zone.dimension, start, guarded, guard)
       await verifyOwnership()
-      const receipt = MinecraftHouseReceipt.parse({ built: true, zoneId: request.zone.id, checked: volume, placed: expectedPlacements, consumed: missing })
+      const receipt = MinecraftHouseReceipt.parse({ built: true, zoneId: request.zone.id, checked: volume, placed: expectedPlacements,
+        consumed: this.creative ? {} : missing, ...(this.creative && { creative: true as const }) })
       if (!minecraftHouseReceiptMatches(receipt, request)) throw new Error('house-receipt-unconfirmed')
       this.record('action.finished', { kind, ...receipt })
       return receipt
@@ -2975,7 +3161,7 @@ export class CbiWorld extends EventEmitter {
   }
 
   private houseInventoryMatches(before: HouseMaterials, after: HouseMaterials, expected: HouseMaterials): boolean {
-    return HOUSE_MATERIALS.every(material => (before[material] ?? 0) - (after[material] ?? 0) === (expected[material] ?? 0))
+    return HOUSE_MATERIALS.every(material => (before[material] ?? 0) - (after[material] ?? 0) === (this.creative ? 0 : (expected[material] ?? 0)))
   }
 
   private async verifyHouseReturn(dimension: string, start: Position, signal: AbortSignal, guard: () => void): Promise<void> {
@@ -3002,7 +3188,9 @@ export class CbiWorld extends EventEmitter {
     await this.verifyHouseReturn(request.zone.dimension, start, signal, guard)
     const { index, material } = cell
     if (reason) return { outcome: 'blocked', index, material, consumed: 0, reason }
-    return progress.placed ? { outcome: 'placed', index, material, consumed: 1 } : { outcome: 'already-present', index, material, consumed: 0 }
+    if (progress.placed && this.creative) return { outcome: 'placed', index, material, consumed: 0, creative: true }
+    if (progress.placed) return { outcome: 'placed', index, material, consumed: 1 }
+    return { outcome: 'already-present', index, material, consumed: 0 }
   }
 
   async buildCamp(input: unknown, signal?: AbortSignal, visitCenter?: Position): Promise<unknown> {

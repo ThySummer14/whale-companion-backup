@@ -148,7 +148,7 @@ test('verified subtitle reading projects only a stable public card and survives 
   assert.equal(h.store.feed.bySourceTask(job.id).deletedAt, deleted.deletedAt)
   const db = new DatabaseSync(path, { readOnly: true })
   try {
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 43)
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 49)
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
   } finally { db.close() }
 })

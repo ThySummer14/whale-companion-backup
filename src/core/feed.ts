@@ -3,11 +3,15 @@ import type { DatabaseSync } from 'node:sqlite'
 import { z } from 'zod'
 import { MAX_SINGING_WAV_BYTES } from '../protocol/singing.ts'
 import { BilibiliClipReaction, bilibiliClipSharePrefix } from './bilibili-clip-share.ts'
-import { FEED_REPLY_CONTEXT_PREFIX, FEED_REPLY_WINDOW, FeedReplyDecision, isFeedReplyContext } from './feed-reply.ts'
+import { FEED_REPLY_CONTEXT_PREFIX, FEED_REPLY_WINDOW, FeedReplyDecision, FeedReplyPayload, currentFeedReplyMemories, isFeedReplyContext } from './feed-reply.ts'
 import type { BilibiliQueueRepository } from './bilibili-queue.ts'
 import type { MediaRepository } from './media.ts'
+import type { MemoryRepository } from './memory.ts'
 import { MINECRAFT_HOUSE_CAPABILITY } from './minecraft-house-repository.ts'
-import { MinecraftMilestoneMoment, matchesMinecraftMilestoneShare } from './minecraft-milestone-share.ts'
+import type { MinecraftHouseProjectRepository } from './minecraft-house-project-repository.ts'
+import { HOUSE_PROJECT_VERIFY_CAPABILITY } from './minecraft-house-project.ts'
+import { MINECRAFT_SHARE_TTL_MS, MinecraftMilestoneMoment, matchesMinecraftMilestoneShare, minecraftHouseProjectShareMoment,
+  minecraftShareDedupeKey } from './minecraft-milestone-share.ts'
 import {
   BILIBILI_AUTONOMY_CONTEXT,
   BILIBILI_CLIP_CONTEXT,
@@ -91,6 +95,8 @@ export class FeedRepository {
     private readonly db: DatabaseSync,
     private readonly media: Pick<MediaRepository, 'songDuration'>,
     private readonly bilibili: Pick<BilibiliQueueRepository, 'verifiedCompletedClip'>,
+    private readonly houseProjects: Pick<MinecraftHouseProjectRepository, 'verifiedCompletion'>,
+    private readonly memory: Pick<MemoryRepository, 'get'>,
     private readonly transaction: <T>(operation: () => T) => T,
   ) {}
 
@@ -214,18 +220,29 @@ export class FeedRepository {
     if (!input.sourceTaskId || !input.sourceSessionId || input.mediaId !== undefined || source?.status !== 'succeeded') {
       throw new Error('Minecraft milestone share requires a completed source and authorized text review')
     }
+    const projectProof = source.capability_id === HOUSE_PROJECT_VERIFY_CAPABILITY
+      ? this.houseProjects.verifiedCompletion(input.sourceTaskId) : undefined
+    const project = projectProof && minecraftHouseProjectShareMoment(input.sourceTaskId, projectProof)
+    const dedupeKey = minecraftShareDedupeKey(project ?? { taskId: input.sourceTaskId })
     const job = this.db.prepare(`SELECT j.payload_json FROM autonomous_job j
       JOIN task t ON t.id=j.task_id AND t.context_id=j.context_id
       JOIN session_binding b ON b.context_id=j.context_id
       WHERE t.external_id=? AND j.dedupe_key=? AND j.kind='minecraft.share' AND j.context_id=?
       AND t.status='running' AND t.capability_id='core.autonomy' AND j.attempts=1 AND j.lease_until>?
       AND b.session_id=? AND b.kind='system'`)
-      .get(`autonomy:minecraft.share:${input.sourceTaskId}`, input.sourceTaskId, MINECRAFT_SHARE_CONTEXT, Date.now(), input.sourceSessionId)
+      .get(`autonomy:minecraft.share:${dedupeKey}`, dedupeKey, MINECRAFT_SHARE_CONTEXT, Date.now(), input.sourceSessionId)
     const snapshot = MinecraftMilestoneMoment.safeParse(parseJson(job?.payload_json)).data
     const settings = this.db.prepare("SELECT value FROM state WHERE key='autonomy.settings'").get()
     if (!snapshot || snapshot.taskId !== input.sourceTaskId || !matchesMinecraftMilestoneShare(body, snapshot.summary) ||
       !MinecraftMilestoneShareSettings.safeParse(parseJson(settings?.value)).success) {
       throw new Error('Minecraft milestone share source job is missing or invalid')
+    }
+    if (snapshot.kind === 'house-project') {
+      if (!projectProof || project?.projectId !== snapshot.projectId || project.summary !== snapshot.summary ||
+        Date.now() >= Date.parse(projectProof.at) + MINECRAFT_SHARE_TTL_MS) {
+        throw new Error('Minecraft milestone source task is not an eligible completed action')
+      }
+      return
     }
     const eligible = snapshot.kind === 'house'
       ? source.context_id === 'game.minecraft' && source.capability_id === MINECRAFT_HOUSE_CAPABILITY && this.db.prepare(
@@ -260,7 +277,8 @@ export class FeedRepository {
         const ordinary = task?.context_id === 'game.minecraft' && task.status === 'succeeded' &&
           MINECRAFT_SHARE_ACTIONS.some(action => task.capability_id === `minecraft.${action}`)
         if (!ordinary) {
-          const milestone = task?.context_id === 'game.minecraft' && task.capability_id === MINECRAFT_HOUSE_CAPABILITY ||
+          const milestone = task?.context_id === 'game.minecraft' &&
+            (task.capability_id === MINECRAFT_HOUSE_CAPABILITY || task.capability_id === HOUSE_PROJECT_VERIFY_CAPABILITY) ||
             task?.context_id === DAILY_AUTONOMY_CONTEXT && task.capability_id === 'core.autonomy'
           if (!milestone) throw new Error('Minecraft source task is not an eligible completed action')
           this.verifyMinecraftMilestoneShare(input, body, task)
@@ -311,15 +329,17 @@ export class FeedRepository {
       WHERE j.task_id=? AND j.kind='feed.reply' AND j.context_id=? AND j.lease_until>?
       AND t.status='running' AND t.capability_id='core.autonomy' AND b.session_id=? AND b.kind='system'`)
       .get(sourceTaskId, contextId, Date.now(), sourceSessionId)
-    const payload = parseJson(active?.payload_json)
-    const parsed = z.object({ postId: z.uuid(), triggerPostId: z.uuid() }).safeParse(payload)
+    const payload = FeedReplyPayload.safeParse(parseJson(active?.payload_json)).data
     const settings = parseJson(this.db.prepare("SELECT value FROM state WHERE key='autonomy.settings'").get()?.value) as
       { enabled?: boolean; feedRepliesEnabled?: boolean } | undefined
-    if (!parsed.success || parsed.data.postId !== parentId || settings?.enabled === false ||
+    if (!payload || payload.postId !== parentId || settings?.enabled === false ||
       settings?.feedRepliesEnabled === false || this.bySourceTask(sourceTaskId)) throw new Error('Reactive reply decision is no longer authorized')
+    if (payload.memoryRefs?.length && (payload.reviewSessionId !== sourceSessionId || !currentFeedReplyMemories(this.memory, payload.memoryRefs))) {
+      throw new Error('Reactive reply memories have changed')
+    }
     const thread = this.replySnapshot(parentId)
     const target = thread.replies.at(-1) ?? thread
-    if (target.author !== 'user' || target.id !== parsed.data.triggerPostId) throw new Error('Reactive reply source has changed')
+    if (target.author !== 'user' || target.id !== payload.triggerPostId) throw new Error('Reactive reply source has changed')
   }
 
   replySnapshot(id: string): FeedThread {
